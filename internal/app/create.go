@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/urfave/cli/v3"
@@ -39,6 +40,7 @@ func createCommand(deps Deps) *cli.Command {
 			&cli.StringFlag{Name: "name", Usage: "Management cluster name (default: $USER-karpenter)"},
 			&cli.StringFlag{Name: "pull-secret", Usage: "Path to the pull secret file (default: ~/.openshift/pull-secret-latest.json)"},
 			&cli.StringFlag{Name: "ssh-key", Usage: "Path to an SSH public key for node access (optional)"},
+			&cli.BoolFlag{Name: "yes", Usage: "Do not ask for confirmation, also not for deleting DNS leftovers of previous clusters"},
 			&cli.StringFlag{Name: "hosted-name", Usage: "Hosted cluster name (default: <name>-workload)"},
 			&cli.StringFlag{Name: "hypershift", Usage: "Path to the hypershift binary (default: from PATH)"},
 			&cli.StringFlag{Name: "oidc-bucket", Usage: "S3 bucket for OIDC discovery documents, created if missing (default: $USER-hypershift-oidc)"},
@@ -91,6 +93,13 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if err != nil {
 		return err
 	}
+	untracked, err := untrackedClusterNames(dirs, opts)
+	if err != nil {
+		return err
+	}
+	if err := deleteDNSLeftovers(ctx, cmd.Root().Writer, deps, cmd.Bool("yes"), opts.BaseDomain, untracked...); err != nil {
+		return err
+	}
 
 	// Track the clusters before creating them, so that incomplete ones can
 	// be destroyed.
@@ -139,6 +148,26 @@ func requireTrackedClusters(st state, opts createOptions) error {
 	return nil
 }
 
+// untrackedClusterNames returns the names of the clusters to create that
+// hyperctl has no record of. DNS entries with these names are leftovers.
+func untrackedClusterNames(dirs xdg.Dirs, opts createOptions) ([]string, error) {
+	var names []string
+	for name, dir := range map[string]string{
+		opts.Name:       clusterDir(dirs, opts.Name),
+		opts.HostedName: hostedDir(dirs, opts.Name, opts.HostedName),
+	} {
+		_, found, err := loadClusterRecord(dir)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names, nil
+}
+
 // awsCredentialsFile returns the AWS shared credentials file the HyperShift
 // operator uses to write OIDC documents. The operator reads its default
 // profile.
@@ -177,7 +206,7 @@ func resolveCreateOptions(ctx context.Context, cmd *cli.Command, deps Deps, dirs
 	}
 	if deps.Interactive {
 		askSSHKey := !cmd.IsSet("ssh-key") && cfg.SSHKey == nil
-		if err := promptCreateOptions(ctx, cmd, &opts, askSSHKey); err != nil {
+		if err := promptCreateOptions(ctx, cmd, &opts, askSSHKey, !cmd.Bool("yes")); err != nil {
 			return createOptions{}, err
 		}
 		if askSSHKey {

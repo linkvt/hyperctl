@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
+	"github.com/aws/aws-sdk-go-v2/service/route53"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -24,17 +25,19 @@ const (
 
 // Account runs operations against the AWS account of the given config.
 type Account struct {
-	sts *sts.Client
-	iam *iam.Client
-	s3  *s3.Client
+	sts     *sts.Client
+	iam     *iam.Client
+	s3      *s3.Client
+	route53 *route53.Client
 }
 
 // New returns an Account using the credentials of cfg.
 func New(cfg aws.Config) *Account {
 	return &Account{
-		sts: sts.NewFromConfig(cfg),
-		iam: iam.NewFromConfig(cfg),
-		s3:  s3.NewFromConfig(cfg),
+		sts:     sts.NewFromConfig(cfg),
+		iam:     iam.NewFromConfig(cfg),
+		s3:      s3.NewFromConfig(cfg),
+		route53: route53.NewFromConfig(cfg),
 	}
 }
 

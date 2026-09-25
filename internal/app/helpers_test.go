@@ -79,7 +79,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		home:       filepath.Join(root, "home"),
 		logDir:     filepath.Join(root, "log"),
 		pullSecret: filepath.Join(root, "pull-secret.json"),
-		aws:        &fakeAWS{callerARN: testIAMUserARN, publicBuckets: map[string]string{}},
+		aws:        &fakeAWS{callerARN: testIAMUserARN, publicBuckets: map[string]string{}, dns: map[string][]string{}},
 	}
 	binDir := filepath.Join(root, "bin")
 	e.binDir = binDir
@@ -184,6 +184,8 @@ type fakeAWS struct {
 	// publicBuckets maps bucket names to their region.
 	publicBuckets  map[string]string
 	bucketsCreated int
+	// dns maps cluster names to their DNS entries.
+	dns map[string][]string
 }
 
 func (f *fakeAWS) CallerIdentity(context.Context) (string, error) {
@@ -217,4 +219,13 @@ func writeFile(t *testing.T, path, content string, perm os.FileMode) {
 	if err := os.WriteFile(path, []byte(content), perm); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func (f *fakeAWS) ClusterDNS(_ context.Context, _, name string) ([]string, error) {
+	return f.dns[name], nil
+}
+
+func (f *fakeAWS) DeleteClusterDNS(_ context.Context, _, name string) error {
+	delete(f.dns, name)
+	return nil
 }

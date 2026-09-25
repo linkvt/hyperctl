@@ -13,8 +13,9 @@ import (
 )
 
 // promptCreateOptions asks for every value not given as a flag, prefilled
-// with the current value, and for the SSH key if askSSHKey is set.
-func promptCreateOptions(ctx context.Context, cmd *cli.Command, opts *createOptions, askSSHKey bool) error {
+// with the current value, and for the SSH key if askSSHKey is set. With
+// confirm set, it asks for confirmation of the summary.
+func promptCreateOptions(ctx context.Context, cmd *cli.Command, opts *createOptions, askSSHKey, confirm bool) error {
 	var fields []huh.Field
 	for _, input := range []struct {
 		flag  string
@@ -56,6 +57,9 @@ func promptCreateOptions(ctx context.Context, cmd *cli.Command, opts *createOpti
 		if err := huh.NewForm(huh.NewGroup(fields...)).RunWithContext(ctx); err != nil {
 			return err
 		}
+	}
+	if !confirm {
+		return nil
 	}
 	return confirmCreateOptions(ctx, *opts)
 }
@@ -128,6 +132,22 @@ func confirmDestroy(ctx context.Context, targets []string) error {
 	}
 	if !confirmed {
 		return errors.New("aborted")
+	}
+	return nil
+}
+
+// confirmDNSDeletion fails unless the user confirms deleting the DNS entries.
+func confirmDNSDeletion(ctx context.Context, list string) error {
+	confirmed := true
+	err := huh.NewForm(huh.NewGroup(
+		huh.NewNote().Title("DNS entries of previous clusters").Description(list),
+		huh.NewConfirm().Title("Delete these DNS entries?").Value(&confirmed),
+	)).RunWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		return errors.New("aborted, the DNS entries conflict with the clusters to create")
 	}
 	return nil
 }

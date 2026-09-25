@@ -17,6 +17,10 @@ type AWSAccount interface {
 	BucketRegion(ctx context.Context, bucket string) (string, bool, error)
 	// CreatePublicBucket creates a bucket with publicly readable objects.
 	CreatePublicBucket(ctx context.Context, bucket, region string) error
+	// ClusterDNS describes the DNS entries of a cluster with the given name.
+	ClusterDNS(ctx context.Context, baseDomain, name string) ([]string, error)
+	// DeleteClusterDNS deletes the DNS entries of a cluster with the given name.
+	DeleteClusterDNS(ctx context.Context, baseDomain, name string) error
 }
 
 // Deps are the external dependencies of the hyperctl CLI.
