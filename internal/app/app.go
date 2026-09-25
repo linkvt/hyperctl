@@ -46,6 +46,7 @@ func New(deps Deps) *cli.Command {
 		// Errors are returned to the caller instead of exiting the process.
 		ExitErrHandler: func(context.Context, *cli.Command, error) {},
 		Commands: []*cli.Command{
+			cacheCommand(),
 			createCommand(deps),
 			destroyCommand(deps),
 			kubeconfigCommand(),
