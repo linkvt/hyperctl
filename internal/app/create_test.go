@@ -542,14 +542,20 @@ func (e *testEnv) installerCalls(t *testing.T) []installerCall {
 	return calls
 }
 
-// ocCallCount returns how often the fake oc was invoked.
+// ocCallCount returns how often the fake oc extracted an installer.
 func (e *testEnv) ocCallCount(t *testing.T) int {
 	t.Helper()
 	dirs, err := filepath.Glob(filepath.Join(e.logDir, "oc-*"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return len(dirs)
+	var count int
+	for _, dir := range dirs {
+		if strings.HasPrefix(readFile(t, filepath.Join(dir, "args")), "adm release extract ") {
+			count++
+		}
+	}
+	return count
 }
 
 func readFile(t *testing.T, path string) string {

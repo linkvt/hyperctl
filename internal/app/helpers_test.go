@@ -17,11 +17,17 @@ const (
 )
 
 // fakeOC records its arguments and "extracts" the fake openshift-install
-// into the --to directory.
+// into the --to directory. For status checks, the API is down when
+// HYPERCTL_TEST_API_DOWN is set and the hosted cluster's Available condition
+// is HYPERCTL_TEST_HOSTED_AVAILABLE.
 const fakeOC = `#!/bin/sh
 d="$HYPERCTL_TEST_LOG/oc-$(ls "$HYPERCTL_TEST_LOG" | grep -c '^oc-')"
 mkdir -p "$d"
 echo "$*" > "$d/args"
+case "$*" in
+  *"get --raw /readyz"*) [ -z "$HYPERCTL_TEST_API_DOWN" ] || exit 1; echo ok; exit 0 ;;
+  *"get hostedcluster"*) printf '%s' "$HYPERCTL_TEST_HOSTED_AVAILABLE"; exit 0 ;;
+esac
 for a in "$@"; do
   case "$a" in --to=*) to="${a#--to=}" ;; esac
 done
