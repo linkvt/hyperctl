@@ -10,7 +10,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/linkvt/hyperctl/internal/ocp"
+	"github.com/linkvt/hyperctl/internal/hypershift"
 	"github.com/linkvt/hyperctl/internal/xdg"
 )
 
@@ -24,6 +24,8 @@ type createOptions struct {
 	Name       string
 	PullSecret string
 	SSHKey     string
+	OIDCBucket string
+	HostedName string
 }
 
 func createCommand(deps Deps) *cli.Command {
@@ -37,6 +39,9 @@ func createCommand(deps Deps) *cli.Command {
 			&cli.StringFlag{Name: "name", Usage: "Management cluster name (default: $USER-karpenter)"},
 			&cli.StringFlag{Name: "pull-secret", Usage: "Path to the pull secret file (default: ~/.openshift/pull-secret-latest.json)"},
 			&cli.StringFlag{Name: "ssh-key", Usage: "Path to an SSH public key for node access (optional)"},
+			&cli.StringFlag{Name: "hosted-name", Usage: "Hosted cluster name (default: <name>-workload)"},
+			&cli.StringFlag{Name: "hypershift", Usage: "Path to the hypershift binary (default: from PATH)"},
+			&cli.StringFlag{Name: "oidc-bucket", Usage: "S3 bucket for OIDC discovery documents, created if missing (default: $USER-hypershift-oidc)"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return runCreate(ctx, cmd, deps)
@@ -45,7 +50,7 @@ func createCommand(deps Deps) *cli.Command {
 }
 
 func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
-	identity, err := requireIAMUser(ctx, deps.STS)
+	identity, err := requireIAMUser(ctx, deps.AWS)
 	if err != nil {
 		return err
 	}
@@ -63,6 +68,14 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if err != nil {
 		return err
 	}
+	hypershiftPath, err := resolveHypershift(ctx, cmd, deps, dirs, cfg)
+	if err != nil {
+		return err
+	}
+	credentialsFile, err := awsCredentialsFile()
+	if err != nil {
+		return err
+	}
 	opts, err := resolveCreateOptions(ctx, cmd, deps, dirs, st, cfg)
 	if err != nil {
 		return err
@@ -71,26 +84,60 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if err := saveState(dirs.State, st); err != nil {
 		return err
 	}
-	clusterDir := clusterDir(dirs, opts.Name)
-
-	record, found, err := loadClusterRecord(clusterDir)
+	oidcBucketRegion, err := ensureAWSPrerequisites(ctx, cmd.Root().Writer, deps.AWS, opts)
 	if err != nil {
 		return err
 	}
-	switch {
-	case found && record.Phase == phaseInstalled:
-		_, _ = fmt.Fprintf(cmd.Root().Writer, "Management cluster %s is already installed\n", opts.Name)
-		st.MgmtCluster = opts.Name
-		return saveState(dirs.State, st)
-	case found:
-		return fmt.Errorf("previous installation of management cluster %s did not complete, destroy it first", opts.Name)
-	}
 
-	if err := installMgmtCluster(ctx, cmd, dirs, opts); err != nil {
+	if err := ensureMgmtCluster(ctx, cmd, dirs, opts); err != nil {
 		return err
 	}
 	st.MgmtCluster = opts.Name
-	return saveState(dirs.State, st)
+	if err := saveState(dirs.State, st); err != nil {
+		return err
+	}
+
+	_, _ = fmt.Fprintln(cmd.Root().Writer, "Installing the HyperShift operator")
+	hs := hypershift.CLI{
+		Path:       hypershiftPath,
+		Kubeconfig: mgmtKubeconfigPath(dirs, opts.Name),
+		Stdout:     cmd.Root().Writer,
+		Stderr:     cmd.Root().ErrWriter,
+	}
+	if err := hs.Install(ctx, hypershift.InstallParams{
+		OIDCBucket:         opts.OIDCBucket,
+		OIDCBucketRegion:   oidcBucketRegion,
+		AWSCredentialsFile: credentialsFile,
+	}); err != nil {
+		return err
+	}
+	if err := ensureHostedCluster(ctx, cmd.Root().Writer, hs, dirs, opts); err != nil {
+		return err
+	}
+	st.HostedCluster = opts.HostedName
+	if err := saveState(dirs.State, st); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintln(cmd.Root().Writer, "Done, use the hosted cluster with:\n  export KUBECONFIG=$(hyperctl kubeconfig)")
+	return nil
+}
+
+// awsCredentialsFile returns the AWS shared credentials file the HyperShift
+// operator uses to write OIDC documents. The operator reads its default
+// profile.
+func awsCredentialsFile() (string, error) {
+	path := os.Getenv("AWS_SHARED_CREDENTIALS_FILE")
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		path = filepath.Join(home, ".aws", "credentials")
+	}
+	if _, err := os.Stat(path); err != nil {
+		return "", fmt.Errorf("AWS credentials file for the HyperShift operator: %w", err)
+	}
+	return path, nil
 }
 
 // resolveCreateOptions takes values from flags, prompts for missing ones when
@@ -108,6 +155,8 @@ func resolveCreateOptions(ctx context.Context, cmd *cli.Command, deps Deps, dirs
 		Name:       flagOr(cmd, "name", defaults.Name),
 		PullSecret: flagOr(cmd, "pull-secret", defaults.PullSecret),
 		SSHKey:     flagOr(cmd, "ssh-key", defaults.SSHKey),
+		OIDCBucket: flagOr(cmd, "oidc-bucket", defaults.OIDCBucket),
+		HostedName: flagOr(cmd, "hosted-name", ""),
 	}
 	if deps.Interactive {
 		askSSHKey := !cmd.IsSet("ssh-key") && cfg.SSHKey == nil
@@ -120,6 +169,9 @@ func resolveCreateOptions(ctx context.Context, cmd *cli.Command, deps Deps, dirs
 				return createOptions{}, err
 			}
 		}
+	}
+	if opts.HostedName == "" && opts.Name != "" {
+		opts.HostedName = opts.Name + "-workload"
 	}
 	// Paths from the config file or prompts are not expanded by a shell.
 	if opts.PullSecret, err = expandHome(opts.PullSecret); err != nil {
@@ -136,6 +188,7 @@ func resolveCreateOptions(ctx context.Context, cmd *cli.Command, deps Deps, dirs
 		{"--base-domain", opts.BaseDomain},
 		{"--name", opts.Name},
 		{"--pull-secret", opts.PullSecret},
+		{"--oidc-bucket", opts.OIDCBucket},
 	} {
 		if required.value == "" {
 			missing = append(missing, required.flag)
@@ -159,9 +212,11 @@ func defaultCreateOptions(deps Deps, st state, cfg config) (createOptions, error
 		Region:     cmp.Or(cfg.Region, deps.DefaultRegion),
 		BaseDomain: cmp.Or(cfg.BaseDomain, defaultBaseDomain),
 		PullSecret: cmp.Or(cfg.PullSecret, filepath.Join(home, ".openshift", "pull-secret-latest.json")),
+		OIDCBucket: cfg.OIDCBucket,
 	}
 	if user := os.Getenv("USER"); user != "" {
 		opts.Name = user + "-karpenter"
+		opts.OIDCBucket = cmp.Or(opts.OIDCBucket, user+"-hypershift-oidc")
 	}
 	if cfg.SSHKey != nil {
 		opts.SSHKey = *cfg.SSHKey
@@ -187,57 +242,4 @@ func expandHome(path string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, rest), nil
-}
-
-// installMgmtCluster extracts the installer for the release and installs the
-// management cluster, tracking progress in the cluster record.
-func installMgmtCluster(ctx context.Context, cmd *cli.Command, dirs xdg.Dirs, opts createOptions) error {
-	release := ocp.Release{Version: opts.Release}
-
-	pullSecret, err := os.ReadFile(opts.PullSecret)
-	if err != nil {
-		return fmt.Errorf("reading pull secret: %w", err)
-	}
-	var sshKey []byte
-	if opts.SSHKey != "" {
-		if sshKey, err = os.ReadFile(opts.SSHKey); err != nil {
-			return fmt.Errorf("reading SSH key: %w", err)
-		}
-	}
-
-	installer, err := ocp.EnsureInstaller(ctx, filepath.Join(dirs.Cache, "releases"), release, opts.PullSecret)
-	if err != nil {
-		return err
-	}
-
-	installConfig, err := ocp.RenderInstallConfig(ocp.InstallConfigParams{
-		Name:       opts.Name,
-		BaseDomain: opts.BaseDomain,
-		Region:     opts.Region,
-		PullSecret: strings.TrimSpace(string(pullSecret)),
-		SSHKey:     strings.TrimSpace(string(sshKey)),
-	})
-	if err != nil {
-		return err
-	}
-
-	clusterDir := clusterDir(dirs, opts.Name)
-	installDir := installDir(dirs, opts.Name)
-	if err := os.MkdirAll(installDir, 0o700); err != nil {
-		return err
-	}
-	// The installer consumes install-config.yaml, keep a copy for reference.
-	for _, dir := range []string{clusterDir, installDir} {
-		if err := os.WriteFile(filepath.Join(dir, "install-config.yaml"), installConfig, 0o600); err != nil {
-			return err
-		}
-	}
-
-	if err := saveClusterRecord(clusterDir, clusterRecord{Platform: platformAWS, Phase: phaseInstalling}); err != nil {
-		return err
-	}
-	if err := installer.CreateCluster(ctx, installDir, release, cmd.Root().Writer, cmd.Root().ErrWriter); err != nil {
-		return err
-	}
-	return saveClusterRecord(clusterDir, clusterRecord{Platform: platformAWS, Phase: phaseInstalled})
 }

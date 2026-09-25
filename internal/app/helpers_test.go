@@ -5,10 +5,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
-
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	"github.com/linkvt/hyperctl/internal/app"
 )
@@ -48,13 +46,26 @@ echo '{}' > "$dir/metadata.json"
 [ -z "$HYPERCTL_TEST_INSTALLER_FAIL" ] || exit 1
 `
 
+// fakeHypershift records its arguments and the kubeconfig it runs against.
+// "create kubeconfig" prints a fake hosted cluster kubeconfig.
+const fakeHypershift = `#!/bin/sh
+d="$HYPERCTL_TEST_LOG/hypershift-$(ls "$HYPERCTL_TEST_LOG" | grep -c '^hypershift-')"
+mkdir -p "$d"
+echo "$*" > "$d/args"
+printf '%s' "$KUBECONFIG" > "$d/kubeconfig"
+case "$1 $2" in
+  "create kubeconfig") echo "fake hosted kubeconfig" ;;
+esac
+`
+
 // testEnv isolates a hyperctl run: temp HOME, fake binaries on PATH and a
 // fake AWS identity.
 type testEnv struct {
+	binDir        string
 	home          string
 	logDir        string
 	pullSecret    string
-	callerARN     string
+	aws           *fakeAWS
 	defaultRegion string
 }
 
@@ -65,25 +76,44 @@ func newTestEnv(t *testing.T) *testEnv {
 		home:       filepath.Join(root, "home"),
 		logDir:     filepath.Join(root, "log"),
 		pullSecret: filepath.Join(root, "pull-secret.json"),
-		callerARN:  testIAMUserARN,
+		aws:        &fakeAWS{callerARN: testIAMUserARN, publicBuckets: map[string]string{}},
 	}
 	binDir := filepath.Join(root, "bin")
+	e.binDir = binDir
 	fakeInstallerPath := filepath.Join(root, "fake-openshift-install")
 	for _, dir := range []string{e.home, e.logDir, binDir} {
 		mustMkdir(t, dir)
 	}
 	writeFile(t, filepath.Join(binDir, "oc"), fakeOC, 0o755)
+	writeFile(t, filepath.Join(binDir, "hypershift"), fakeHypershift, 0o755)
+	mustMkdir(t, filepath.Join(e.home, ".aws"))
+	writeFile(t, filepath.Join(e.home, ".aws", "credentials"), "[default]\n", 0o600)
 	writeFile(t, fakeInstallerPath, fakeInstaller, 0o755)
 	writeFile(t, e.pullSecret, testPullSecret, 0o600)
 
 	t.Setenv("HOME", e.home)
+	t.Setenv("USER", "tester")
 	for _, v := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"} {
 		t.Setenv(v, "")
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "")
 	t.Setenv("HYPERCTL_TEST_LOG", e.logDir)
 	t.Setenv("HYPERCTL_TEST_FAKE_INSTALLER", fakeInstallerPath)
 	return e
+}
+
+// moveHypershiftOutOfPath moves the fake hypershift out of PATH and returns
+// its new location.
+func (e *testEnv) moveHypershiftOutOfPath(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(filepath.Dir(e.binDir), "hypershift-bin")
+	mustMkdir(t, dir)
+	path := filepath.Join(dir, "hypershift")
+	if err := os.Rename(filepath.Join(e.binDir, "hypershift"), path); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 // run executes hyperctl with the given arguments and fails the test on error.
@@ -100,7 +130,7 @@ func (e *testEnv) runErr(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	var out bytes.Buffer
 	cmd := app.New(app.Deps{
-		STS:           fakeSTS{arn: e.callerARN},
+		AWS:           e.aws,
 		DefaultRegion: e.defaultRegion,
 		Stdout:        &out,
 	})
@@ -108,12 +138,68 @@ func (e *testEnv) runErr(t *testing.T, args ...string) (string, error) {
 	return out.String(), err
 }
 
-type fakeSTS struct {
-	arn string
+// hypershiftCall is one recorded invocation of the fake hypershift.
+type hypershiftCall struct {
+	args       string
+	kubeconfig string
 }
 
-func (f fakeSTS) GetCallerIdentity(context.Context, *sts.GetCallerIdentityInput, ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error) {
-	return &sts.GetCallerIdentityOutput{Arn: aws.String(f.arn)}, nil
+// hypershiftCalls reads the invocations recorded by the fake hypershift.
+func (e *testEnv) hypershiftCalls(t *testing.T) []hypershiftCall {
+	t.Helper()
+	dirs, err := filepath.Glob(filepath.Join(e.logDir, "hypershift-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls []hypershiftCall
+	for _, dir := range dirs {
+		calls = append(calls, hypershiftCall{
+			args:       readFile(t, filepath.Join(dir, "args")),
+			kubeconfig: readFile(t, filepath.Join(dir, "kubeconfig")),
+		})
+	}
+	return calls
+}
+
+// hypershiftCall returns the recorded hypershift invocation whose arguments
+// start with prefix.
+func (e *testEnv) hypershiftCall(t *testing.T, prefix string) hypershiftCall {
+	t.Helper()
+	for _, call := range e.hypershiftCalls(t) {
+		if strings.HasPrefix(call.args, prefix) {
+			return call
+		}
+	}
+	t.Fatalf("no hypershift call with prefix %q in %v", prefix, e.hypershiftCalls(t))
+	return hypershiftCall{}
+}
+
+// fakeAWS is an in-memory AWS account.
+type fakeAWS struct {
+	callerARN       string
+	spotRoleMissing bool
+	// publicBuckets maps bucket names to their region.
+	publicBuckets  map[string]string
+	bucketsCreated int
+}
+
+func (f *fakeAWS) CallerIdentity(context.Context) (string, error) {
+	return f.callerARN, nil
+}
+
+func (f *fakeAWS) SpotRoleExists(context.Context) (bool, error) {
+	return !f.spotRoleMissing, nil
+}
+
+func (f *fakeAWS) BucketRegion(_ context.Context, bucket string) (string, bool, error) {
+	region, found := f.publicBuckets[bucket]
+	return region, found, nil
+}
+
+func (f *fakeAWS) CreatePublicBucket(_ context.Context, bucket, region string) error {
+	f.publicBuckets[bucket] = region
+	f.bucketsCreated++
+	return nil
 }
 
 func mustMkdir(t *testing.T, dir string) {

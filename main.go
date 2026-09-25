@@ -7,10 +7,10 @@ import (
 	"os/signal"
 
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"golang.org/x/term"
 
 	"github.com/linkvt/hyperctl/internal/app"
+	"github.com/linkvt/hyperctl/internal/awsaccount"
 )
 
 func main() {
@@ -29,7 +29,7 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("loading AWS config: %w", err)
 	}
 	cmd := app.New(app.Deps{
-		STS:           sts.NewFromConfig(awsConfig),
+		AWS:           awsaccount.New(awsConfig),
 		DefaultRegion: awsConfig.Region,
 		Interactive:   term.IsTerminal(int(os.Stdin.Fd())),
 		Stdout:        os.Stdout,

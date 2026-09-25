@@ -26,3 +26,31 @@ func TestKubeconfigMgmtPrintsInstallerKubeconfigPath(t *testing.T) {
 		t.Errorf("printed path %q is not the installer kubeconfig, content: %q", path, content)
 	}
 }
+
+func TestKubeconfigHostedPrintsHostedClusterKubeconfigPath(t *testing.T) {
+	tests := map[string][]string{
+		"explicit hosted": {"kubeconfig", "hosted"},
+		"default":         {"kubeconfig"},
+	}
+	for name, args := range tests {
+		t.Run(name, func(t *testing.T) {
+			env := newTestEnv(t)
+			env.run(t, "create",
+				"--release", "5.1.0-ec.0",
+				"--region", "eu-central-1",
+				"--name", "test-mgmt",
+				"--pull-secret", env.pullSecret,
+			)
+
+			path := strings.TrimSpace(env.run(t, args...))
+
+			content, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("reading printed kubeconfig path %q: %v", path, err)
+			}
+			if strings.TrimSpace(string(content)) != "fake hosted kubeconfig" {
+				t.Errorf("printed path %q is not the hosted cluster kubeconfig, content: %q", path, content)
+			}
+		})
+	}
+}

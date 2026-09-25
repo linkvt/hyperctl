@@ -4,18 +4,24 @@ import (
 	"context"
 	"io"
 
-	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/urfave/cli/v3"
 )
 
-// STSClient is the subset of the AWS STS API hyperctl uses.
-type STSClient interface {
-	GetCallerIdentity(ctx context.Context, params *sts.GetCallerIdentityInput, optFns ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error)
+// AWSAccount are the AWS account operations hyperctl uses.
+type AWSAccount interface {
+	// CallerIdentity returns the ARN of the credentials in use.
+	CallerIdentity(ctx context.Context) (string, error)
+	// SpotRoleExists reports whether the EC2 Spot service-linked role exists.
+	SpotRoleExists(ctx context.Context) (bool, error)
+	// BucketRegion returns the region of a bucket and whether it exists.
+	BucketRegion(ctx context.Context, bucket string) (string, bool, error)
+	// CreatePublicBucket creates a bucket with publicly readable objects.
+	CreatePublicBucket(ctx context.Context, bucket, region string) error
 }
 
 // Deps are the external dependencies of the hyperctl CLI.
 type Deps struct {
-	STS STSClient
+	AWS AWSAccount
 	// DefaultRegion is the region of the active AWS profile, if any.
 	DefaultRegion string
 	// Interactive enables prompts for values not given as flags.

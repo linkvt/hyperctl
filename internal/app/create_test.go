@@ -66,7 +66,6 @@ func TestCreateRunsInstallerWithReleaseAndInstallConfig(t *testing.T) {
 
 func TestCreateUsesDefaultsForMissingValues(t *testing.T) {
 	env := newTestEnv(t)
-	t.Setenv("USER", "tester")
 	env.defaultRegion = "us-east-2"
 	defaultPullSecret := filepath.Join(env.home, ".openshift", "pull-secret-latest.json")
 	mustMkdir(t, filepath.Dir(defaultPullSecret))
@@ -262,7 +261,7 @@ func TestCreateKeepsInstallConfigCopy(t *testing.T) {
 
 func TestCreateRefusesAssumedRoleCredentials(t *testing.T) {
 	env := newTestEnv(t)
-	env.callerARN = "arn:aws:sts::123456789012:assumed-role/123456789012-admin/tester"
+	env.aws.callerARN = "arn:aws:sts::123456789012:assumed-role/123456789012-admin/tester"
 
 	_, err := env.runErr(t, "create",
 		"--release", "5.1.0-ec.0",
@@ -278,6 +277,150 @@ func TestCreateRefusesAssumedRoleCredentials(t *testing.T) {
 	if got := env.ocCallCount(t) + len(env.installerCalls(t)); got != 0 {
 		t.Errorf("expected no oc or installer calls, got %d", got)
 	}
+}
+
+func TestCreateRequiresSpotServiceLinkedRole(t *testing.T) {
+	env := newTestEnv(t)
+	env.aws.spotRoleMissing = true
+
+	_, err := env.runErr(t, "create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	)
+
+	if err == nil || !strings.Contains(err.Error(), "AWSServiceRoleForEC2Spot") {
+		t.Errorf("expected missing Spot role error, got %v", err)
+	}
+	if got := len(env.installerCalls(t)); got != 0 {
+		t.Errorf("expected no installer calls, got %d", got)
+	}
+}
+
+func TestCreateCreatesMissingOIDCBucket(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.run(t, "create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	)
+
+	if got := env.aws.publicBuckets["tester-hypershift-oidc"]; got != "eu-central-1" {
+		t.Errorf("expected public bucket tester-hypershift-oidc in eu-central-1, got buckets %v", env.aws.publicBuckets)
+	}
+}
+
+func TestCreateReusesExistingOIDCBucket(t *testing.T) {
+	env := newTestEnv(t)
+	env.aws.publicBuckets["my-oidc"] = "us-east-2"
+
+	env.run(t, "create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+		"--oidc-bucket", "my-oidc",
+	)
+
+	if env.aws.bucketsCreated != 0 {
+		t.Errorf("expected no bucket to be created, got %d", env.aws.bucketsCreated)
+	}
+}
+
+func TestCreateInstallsHyperShiftOperator(t *testing.T) {
+	env := newTestEnv(t)
+	env.aws.publicBuckets["my-oidc"] = "us-east-2"
+
+	env.run(t, "create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+		"--oidc-bucket", "my-oidc",
+	)
+
+	call := env.hypershiftCall(t, "install ")
+	want := "install" +
+		" --oidc-storage-provider-s3-bucket-name my-oidc" +
+		" --oidc-storage-provider-s3-credentials " + filepath.Join(env.home, ".aws", "credentials") +
+		" --oidc-storage-provider-s3-region us-east-2" +
+		" --tech-preview-no-upgrade" +
+		" --wait-until-available"
+	if call.args != want {
+		t.Errorf("hypershift args:\ngot:  %s\nwant: %s", call.args, want)
+	}
+	if want := filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/install/auth/kubeconfig"); call.kubeconfig != want {
+		t.Errorf("hypershift KUBECONFIG: got %q, want %q", call.kubeconfig, want)
+	}
+}
+
+func TestCreateCreatesHostedClusterWithAutoNode(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.run(t, "create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--base-domain", "example.com",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	)
+
+	call := env.hypershiftCall(t, "create cluster ")
+	want := "create cluster aws" +
+		" --name test-mgmt-workload" +
+		" --region eu-central-1" +
+		" --base-domain example.com" +
+		" --pull-secret " + env.pullSecret +
+		" --release-image quay.io/openshift-release-dev/ocp-release:5.1.0-ec.0-x86_64" +
+		" --node-pool-replicas 1" +
+		" --auto-node" +
+		" --wait" +
+		" --timeout 45m0s"
+	if call.args != want {
+		t.Errorf("hypershift args:\ngot:  %s\nwant: %s", call.args, want)
+	}
+	if want := filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/install/auth/kubeconfig"); call.kubeconfig != want {
+		t.Errorf("hypershift KUBECONFIG: got %q, want %q", call.kubeconfig, want)
+	}
+}
+
+func TestCreateRequiresHypershiftBinary(t *testing.T) {
+	env := newTestEnv(t)
+	env.moveHypershiftOutOfPath(t)
+
+	_, err := env.runErr(t, "create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	)
+
+	if err == nil || !strings.Contains(err.Error(), "hypershift") {
+		t.Errorf("expected missing hypershift error, got %v", err)
+	}
+	if got := len(env.installerCalls(t)); got != 0 {
+		t.Errorf("expected no installer calls, got %d", got)
+	}
+}
+
+func TestCreateUsesHypershiftFromConfig(t *testing.T) {
+	env := newTestEnv(t)
+	path := env.moveHypershiftOutOfPath(t)
+	configPath := filepath.Join(env.home, ".config", "hyperctl", "config.yaml")
+	mustMkdir(t, filepath.Dir(configPath))
+	writeFile(t, configPath, "hypershift: "+path+"\n", 0o600)
+
+	env.run(t, "create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	)
+
+	env.hypershiftCall(t, "create cluster ")
 }
 
 func TestCreateSkipsInstalledCluster(t *testing.T) {
@@ -320,6 +463,29 @@ func TestCreateRefusesIncompleteInstallation(t *testing.T) {
 	}
 	if got := len(env.installerCalls(t)); got != 1 {
 		t.Errorf("expected 1 installer call, got %d", got)
+	}
+}
+
+func TestCreateSkipsCreatedHostedCluster(t *testing.T) {
+	env := newTestEnv(t)
+
+	for range 2 {
+		env.run(t, "create",
+			"--release", "5.1.0-ec.0",
+			"--region", "eu-central-1",
+			"--name", "test-mgmt",
+			"--pull-secret", env.pullSecret,
+		)
+	}
+
+	var creates int
+	for _, call := range env.hypershiftCalls(t) {
+		if strings.HasPrefix(call.args, "create cluster ") {
+			creates++
+		}
+	}
+	if creates != 1 {
+		t.Errorf("expected 1 hosted cluster creation, got %d", creates)
 	}
 }
 

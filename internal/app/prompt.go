@@ -31,6 +31,12 @@ func promptCreateOptions(ctx context.Context, cmd *cli.Command, opts *createOpti
 		}
 		fields = append(fields, huh.NewInput().Title(input.title).Value(input.value).Validate(requireValue))
 	}
+	if !cmd.IsSet("hosted-name") {
+		fields = append(fields, huh.NewInput().
+			Title("Hosted cluster name").
+			Placeholder("<management cluster name>-workload").
+			Value(&opts.HostedName))
+	}
 	if askSSHKey {
 		sshKeys, err := sshPublicKeys()
 		if err != nil {
@@ -59,12 +65,16 @@ func confirmCreateOptions(ctx context.Context, opts createOptions) error {
 	if sshKey == "" {
 		sshKey = "none"
 	}
-	summary := fmt.Sprintf("Release:     %s\nRegion:      %s\nBase domain: %s\nName:        %s\nPull secret: %s\nSSH key:     %s",
-		opts.Release, opts.Region, opts.BaseDomain, opts.Name, opts.PullSecret, sshKey)
+	hostedName := opts.HostedName
+	if hostedName == "" {
+		hostedName = opts.Name + "-workload"
+	}
+	summary := fmt.Sprintf("Release:        %s\nRegion:         %s\nBase domain:    %s\nMgmt cluster:   %s\nHosted cluster: %s\nPull secret:    %s\nSSH key:        %s\nOIDC bucket:    %s",
+		opts.Release, opts.Region, opts.BaseDomain, opts.Name, hostedName, opts.PullSecret, sshKey, opts.OIDCBucket)
 	confirmed := true
 	err := huh.NewForm(huh.NewGroup(
-		huh.NewNote().Title("Management cluster").Description(summary),
-		huh.NewConfirm().Title("Create the cluster?").Value(&confirmed),
+		huh.NewNote().Title("Summary").Description(summary),
+		huh.NewConfirm().Title("Create the clusters?").Value(&confirmed),
 	)).RunWithContext(ctx)
 	if err != nil {
 		return err
@@ -89,4 +99,17 @@ func sshPublicKeys() ([]string, error) {
 		return nil, err
 	}
 	return filepath.Glob(filepath.Join(home, ".ssh", "*.pub"))
+}
+
+// promptHypershiftPath asks for the path of the hypershift binary.
+func promptHypershiftPath(ctx context.Context) (string, error) {
+	var path string
+	err := huh.NewForm(huh.NewGroup(
+		huh.NewInput().
+			Title("hypershift binary").
+			Description("Not found in PATH, e.g. ~/repos/openshift/hypershift/bin/hypershift").
+			Value(&path).
+			Validate(requireValue),
+	)).RunWithContext(ctx)
+	return path, err
 }

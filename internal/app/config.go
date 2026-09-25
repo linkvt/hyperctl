@@ -11,7 +11,10 @@ type config struct {
 	PullSecret string `json:"pullSecret,omitempty"`
 	// SSHKey is the path of the SSH public key for node access. nil means not
 	// configured yet, an empty string means no SSH key.
-	SSHKey *string `json:"sshKey,omitempty"`
+	SSHKey     *string `json:"sshKey,omitempty"`
+	OIDCBucket string  `json:"oidcBucket,omitempty"`
+	// Hypershift is the path of the hypershift binary.
+	Hypershift string `json:"hypershift,omitempty"`
 }
 
 func loadConfig(configDir string) (config, error) {

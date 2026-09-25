@@ -6,18 +6,16 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws/arn"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
 // requireIAMUser fails unless the AWS credentials belong to an IAM user.
 // Cluster installation must not run with temporary SAML (assumed role)
 // credentials, e.g. from within an rh-aws-saml-login shell.
-func requireIAMUser(ctx context.Context, client STSClient) (string, error) {
-	out, err := client.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+func requireIAMUser(ctx context.Context, account AWSAccount) (string, error) {
+	identity, err := account.CallerIdentity(ctx)
 	if err != nil {
-		return "", fmt.Errorf("getting AWS caller identity: %w", err)
+		return "", err
 	}
-	identity := *out.Arn
 	parsed, err := arn.Parse(identity)
 	if err != nil {
 		return "", fmt.Errorf("parsing AWS caller identity %q: %w", identity, err)

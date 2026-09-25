@@ -19,3 +19,12 @@ func installDir(dirs xdg.Dirs, name string) string {
 func mgmtKubeconfigPath(dirs xdg.Dirs, name string) string {
 	return filepath.Join(installDir(dirs, name), "auth", "kubeconfig")
 }
+
+// hostedDir holds everything hyperctl keeps for a hosted cluster.
+func hostedDir(dirs xdg.Dirs, mgmt, hosted string) string {
+	return filepath.Join(clusterDir(dirs, mgmt), "hosted", hosted)
+}
+
+func hostedKubeconfigPath(dirs xdg.Dirs, mgmt, hosted string) string {
+	return filepath.Join(hostedDir(dirs, mgmt, hosted), "kubeconfig")
+}

@@ -11,8 +11,9 @@ import (
 
 // state is what hyperctl remembers between runs.
 type state struct {
-	MgmtCluster string `json:"mgmtCluster,omitempty"`
-	LastRelease string `json:"lastRelease,omitempty"`
+	MgmtCluster   string `json:"mgmtCluster,omitempty"`
+	HostedCluster string `json:"hostedCluster,omitempty"`
+	LastRelease   string `json:"lastRelease,omitempty"`
 }
 
 // clusterPhase is the lifecycle phase of a management cluster.
@@ -74,8 +75,13 @@ func writeYAML(path string, v any) error {
 	if err != nil {
 		return err
 	}
+	return writeFile(path, b)
+}
+
+// writeFile writes a private file, creating its parent directories.
+func writeFile(path string, content []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o600)
+	return os.WriteFile(path, content, 0o600)
 }
