@@ -1,0 +1,154 @@
+package app_test
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestDestroyHostedDestroysOnlyHostedCluster(t *testing.T) {
+	env := newTestEnv(t)
+	env.createClusters(t)
+
+	env.run(t, "destroy", "hosted", "--yes")
+
+	call := env.hypershiftCall(t, "destroy ")
+	if want := "destroy cluster aws --name test-mgmt-workload --region eu-central-1 --base-domain example.com"; call.args != want {
+		t.Errorf("hypershift args:\ngot:  %s\nwant: %s", call.args, want)
+	}
+	if want := filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/install/auth/kubeconfig"); call.kubeconfig != want {
+		t.Errorf("hypershift KUBECONFIG: got %q, want %q", call.kubeconfig, want)
+	}
+	if _, err := env.runErr(t, "kubeconfig", "hosted"); err == nil {
+		t.Error("expected no hosted cluster after destroy")
+	}
+	env.run(t, "kubeconfig", "mgmt")
+	if got := env.installerDestroyCalls(t); len(got) != 0 {
+		t.Errorf("expected no management cluster destroy, got %v", got)
+	}
+}
+
+func TestDestroyDestroysHostedAndManagementCluster(t *testing.T) {
+	env := newTestEnv(t)
+	env.createClusters(t)
+
+	env.run(t, "destroy", "--yes")
+
+	env.hypershiftCall(t, "destroy cluster aws ")
+	calls := env.installerDestroyCalls(t)
+	if want := "destroy cluster --dir " + filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/install"); len(calls) != 1 || calls[0] != want {
+		t.Errorf("installer destroy calls: got %v, want [%s]", calls, want)
+	}
+	if _, err := os.Stat(filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt")); !os.IsNotExist(err) {
+		t.Errorf("expected cluster data to be removed, stat error: %v", err)
+	}
+	if _, err := env.runErr(t, "kubeconfig", "mgmt"); err == nil {
+		t.Error("expected no management cluster after destroy")
+	}
+}
+
+func TestDestroyRequiresConfirmationWhenNotInteractive(t *testing.T) {
+	env := newTestEnv(t)
+	env.createClusters(t)
+
+	_, err := env.runErr(t, "destroy")
+
+	if err == nil || !strings.Contains(err.Error(), "--yes") {
+		t.Errorf("expected confirmation error, got %v", err)
+	}
+	if got := len(env.installerDestroyCalls(t)); got != 0 {
+		t.Errorf("expected no destroy calls, got %d", got)
+	}
+}
+
+func TestDestroyDestroysIncompleteManagementCluster(t *testing.T) {
+	env := newTestEnv(t)
+	t.Setenv("HYPERCTL_TEST_INSTALLER_FAIL", "1")
+	if _, err := env.runErr(t, "create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	); err == nil {
+		t.Fatal("expected failing installer to fail create")
+	}
+
+	env.run(t, "destroy", "--yes")
+
+	if got := len(env.installerDestroyCalls(t)); got != 1 {
+		t.Errorf("expected 1 installer destroy call, got %d", got)
+	}
+}
+
+func TestDestroySkipsHostedClusterThatWasNeverCreated(t *testing.T) {
+	env := newTestEnv(t)
+	t.Setenv("HYPERCTL_TEST_HYPERSHIFT_FAIL", "install")
+	if _, err := env.runErr(t, "create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	); err == nil {
+		t.Fatal("expected failing hypershift install to fail create")
+	}
+	t.Setenv("HYPERCTL_TEST_HYPERSHIFT_FAIL", "")
+
+	env.run(t, "destroy", "--yes")
+
+	for _, call := range env.hypershiftCalls(t) {
+		if strings.HasPrefix(call.args, "destroy ") {
+			t.Errorf("expected no hosted cluster destroy, got %q", call.args)
+		}
+	}
+	if got := len(env.installerDestroyCalls(t)); got != 1 {
+		t.Errorf("expected 1 installer destroy call, got %d", got)
+	}
+}
+
+func TestCreateAfterDestroyHostedReusesManagementClusterSettings(t *testing.T) {
+	env := newTestEnv(t)
+	env.createClusters(t)
+	env.run(t, "destroy", "hosted", "--yes")
+
+	env.run(t, "create")
+
+	var creates []string
+	for _, call := range env.hypershiftCalls(t) {
+		if strings.HasPrefix(call.args, "create cluster ") {
+			creates = append(creates, call.args)
+		}
+	}
+	if len(creates) != 2 || creates[1] != creates[0] {
+		t.Errorf("expected the hosted cluster to be recreated with the same arguments, got %v", creates)
+	}
+}
+
+// createClusters creates a management and a hosted cluster.
+func (e *testEnv) createClusters(t *testing.T) {
+	t.Helper()
+	e.run(t, "create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--base-domain", "example.com",
+		"--name", "test-mgmt",
+		"--pull-secret", e.pullSecret,
+	)
+}
+
+// installerDestroyCalls returns the arguments of recorded
+// "openshift-install destroy" invocations.
+func (e *testEnv) installerDestroyCalls(t *testing.T) []string {
+	t.Helper()
+	dirs, err := filepath.Glob(filepath.Join(e.logDir, "openshift-install-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls []string
+	for _, dir := range dirs {
+		if args := readFile(t, filepath.Join(dir, "args")); strings.HasPrefix(args, "destroy ") {
+			calls = append(calls, args)
+		}
+	}
+	return calls
+}

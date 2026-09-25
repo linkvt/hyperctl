@@ -63,3 +63,14 @@ func (i Installer) CreateCluster(ctx context.Context, installDir string, release
 	}
 	return nil
 }
+
+// DestroyCluster runs "openshift-install destroy cluster" in installDir.
+func (i Installer) DestroyCluster(ctx context.Context, installDir string, stdout, stderr io.Writer) error {
+	cmd := exec.CommandContext(ctx, i.Path, "destroy", "cluster", "--dir", installDir)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("openshift-install destroy cluster: %w", err)
+	}
+	return nil
+}

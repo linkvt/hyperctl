@@ -28,10 +28,17 @@ const (
 // that further platforms can be added without migrating them.
 const platformAWS = "aws"
 
-// clusterRecord is what hyperctl remembers about a management cluster.
+// clusterRecord is what hyperctl remembers about a management or hosted
+// cluster, including what is needed to destroy it.
 type clusterRecord struct {
-	Platform string       `json:"platform"`
-	Phase    clusterPhase `json:"phase"`
+	Platform   string       `json:"platform"`
+	Phase      clusterPhase `json:"phase"`
+	Release    string       `json:"release"`
+	Region     string       `json:"region"`
+	BaseDomain string       `json:"baseDomain"`
+	// PullSecret is the pull secret path, needed to extract the installer
+	// again for destroying a management cluster.
+	PullSecret string `json:"pullSecret,omitempty"`
 }
 
 func loadState(stateDir string) (state, error) {

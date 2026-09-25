@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/urfave/cli/v3"
@@ -112,4 +113,21 @@ func promptHypershiftPath(ctx context.Context) (string, error) {
 			Validate(requireValue),
 	)).RunWithContext(ctx)
 	return path, err
+}
+
+// confirmDestroy fails unless the user confirms destroying the targets.
+func confirmDestroy(ctx context.Context, targets []string) error {
+	var confirmed bool
+	err := huh.NewForm(huh.NewGroup(
+		huh.NewConfirm().
+			Title("Destroy " + strings.Join(targets, " and ") + "?").
+			Value(&confirmed),
+	)).RunWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		return errors.New("aborted")
+	}
+	return nil
 }

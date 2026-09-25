@@ -41,6 +41,7 @@ func New(deps Deps) *cli.Command {
 		ExitErrHandler: func(context.Context, *cli.Command, error) {},
 		Commands: []*cli.Command{
 			createCommand(deps),
+			destroyCommand(deps),
 			kubeconfigCommand(),
 		},
 	}

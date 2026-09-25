@@ -36,6 +36,7 @@ const fakeInstaller = `#!/bin/sh
 d="$HYPERCTL_TEST_LOG/openshift-install-$(ls "$HYPERCTL_TEST_LOG" | grep -c '^openshift-install-')"
 mkdir -p "$d"
 echo "$*" > "$d/args"
+[ "$1" = "destroy" ] && exit 0
 printf '%s' "$OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE" > "$d/release-override"
 printf '%s' "$OPENSHIFT_INSTALL_EXPERIMENTAL_DISABLE_IMAGE_POLICY" > "$d/disable-image-policy"
 dir="$4"
@@ -47,12 +48,14 @@ echo '{}' > "$dir/metadata.json"
 `
 
 // fakeHypershift records its arguments and the kubeconfig it runs against.
-// "create kubeconfig" prints a fake hosted cluster kubeconfig.
+// "create kubeconfig" prints a fake hosted cluster kubeconfig. It fails for
+// the subcommand in HYPERCTL_TEST_HYPERSHIFT_FAIL.
 const fakeHypershift = `#!/bin/sh
 d="$HYPERCTL_TEST_LOG/hypershift-$(ls "$HYPERCTL_TEST_LOG" | grep -c '^hypershift-')"
 mkdir -p "$d"
 echo "$*" > "$d/args"
 printf '%s' "$KUBECONFIG" > "$d/kubeconfig"
+[ -n "$HYPERCTL_TEST_HYPERSHIFT_FAIL" ] && [ "$1" = "$HYPERCTL_TEST_HYPERSHIFT_FAIL" ] && exit 1
 case "$1 $2" in
   "create kubeconfig") echo "fake hosted kubeconfig" ;;
 esac

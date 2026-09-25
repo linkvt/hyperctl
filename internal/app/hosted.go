@@ -26,7 +26,14 @@ func ensureHostedCluster(ctx context.Context, w io.Writer, hs hypershift.CLI, di
 		return fmt.Errorf("previous creation of hosted cluster %s did not complete, destroy it first", opts.HostedName)
 	}
 
-	if err := saveClusterRecord(dir, clusterRecord{Platform: platformAWS, Phase: phaseInstalling}); err != nil {
+	record = clusterRecord{
+		Platform:   platformAWS,
+		Phase:      phaseInstalling,
+		Release:    opts.Release,
+		Region:     opts.Region,
+		BaseDomain: opts.BaseDomain,
+	}
+	if err := saveClusterRecord(dir, record); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(w, "Creating hosted cluster %s with AutoNode, waiting until it is available\n", opts.HostedName)
@@ -47,5 +54,6 @@ func ensureHostedCluster(ctx context.Context, w io.Writer, hs hypershift.CLI, di
 	if err := writeFile(hostedKubeconfigPath(dirs, opts.Name, opts.HostedName), kubeconfig); err != nil {
 		return err
 	}
-	return saveClusterRecord(dir, clusterRecord{Platform: platformAWS, Phase: phaseInstalled})
+	record.Phase = phaseInstalled
+	return saveClusterRecord(dir, record)
 }

@@ -173,6 +173,7 @@ func TestCreateDefaultsToLastUsedRelease(t *testing.T) {
 		"--name", "first",
 		"--pull-secret", env.pullSecret,
 	)
+	env.run(t, "destroy", "--yes")
 
 	env.run(t, "create",
 		"--region", "eu-central-1",
@@ -232,6 +233,7 @@ func TestCreateReusesCachedInstaller(t *testing.T) {
 			"--name", name,
 			"--pull-secret", env.pullSecret,
 		)
+		env.run(t, "destroy", "--yes")
 	}
 
 	if got := env.ocCallCount(t); got != 1 {
@@ -489,6 +491,25 @@ func TestCreateSkipsCreatedHostedCluster(t *testing.T) {
 	}
 }
 
+func TestCreateRefusesSecondManagementCluster(t *testing.T) {
+	env := newTestEnv(t)
+	env.createClusters(t)
+
+	_, err := env.runErr(t, "create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "other-mgmt",
+		"--pull-secret", env.pullSecret,
+	)
+
+	if err == nil || !strings.Contains(err.Error(), "test-mgmt") {
+		t.Errorf("expected error about existing management cluster test-mgmt, got %v", err)
+	}
+	if got := len(env.installerCalls(t)); got != 1 {
+		t.Errorf("expected 1 installer call, got %d", got)
+	}
+}
+
 // installerCall is one recorded invocation of the fake openshift-install.
 type installerCall struct {
 	args               string
@@ -497,7 +518,8 @@ type installerCall struct {
 	installConfig      string
 }
 
-// installerCalls reads the invocations recorded by the fake openshift-install.
+// installerCalls reads the "create cluster" invocations recorded by the fake
+// openshift-install.
 func (e *testEnv) installerCalls(t *testing.T) []installerCall {
 	t.Helper()
 	dirs, err := filepath.Glob(filepath.Join(e.logDir, "openshift-install-*"))
@@ -506,8 +528,12 @@ func (e *testEnv) installerCalls(t *testing.T) []installerCall {
 	}
 	var calls []installerCall
 	for _, dir := range dirs {
+		args := readFile(t, filepath.Join(dir, "args"))
+		if !strings.HasPrefix(args, "create ") {
+			continue
+		}
 		calls = append(calls, installerCall{
-			args:               readFile(t, filepath.Join(dir, "args")),
+			args:               args,
 			releaseOverride:    readFile(t, filepath.Join(dir, "release-override")),
 			disableImagePolicy: readFile(t, filepath.Join(dir, "disable-image-policy")),
 			installConfig:      readFile(t, filepath.Join(dir, "install-config.yaml")),

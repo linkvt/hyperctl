@@ -73,6 +73,15 @@ func (c CLI) CreateCluster(ctx context.Context, p CreateClusterParams) error {
 	return c.run(ctx, args...)
 }
 
+// DestroyCluster destroys an AWS hosted cluster and its cloud resources.
+func (c CLI) DestroyCluster(ctx context.Context, name, region, baseDomain string) error {
+	return c.run(ctx, "destroy", "cluster", "aws",
+		"--name", name,
+		"--region", region,
+		"--base-domain", baseDomain,
+	)
+}
+
 // HostedKubeconfig returns an admin kubeconfig for the hosted cluster.
 func (c CLI) HostedKubeconfig(ctx context.Context, name string) ([]byte, error) {
 	cmd := c.command(ctx, "create", "kubeconfig", "--name", name)

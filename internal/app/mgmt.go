@@ -73,7 +73,15 @@ func installMgmtCluster(ctx context.Context, cmd *cli.Command, dirs xdg.Dirs, op
 		}
 	}
 
-	if err := saveClusterRecord(clusterDir, clusterRecord{Platform: platformAWS, Phase: phaseInstalling}); err != nil {
+	record := clusterRecord{
+		Platform:   platformAWS,
+		Phase:      phaseInstalling,
+		Release:    opts.Release,
+		Region:     opts.Region,
+		BaseDomain: opts.BaseDomain,
+		PullSecret: opts.PullSecret,
+	}
+	if err := saveClusterRecord(clusterDir, record); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(cmd.Root().Writer, "Installing management cluster %s, this takes about 45 minutes (log: %s)\n",
@@ -81,5 +89,6 @@ func installMgmtCluster(ctx context.Context, cmd *cli.Command, dirs xdg.Dirs, op
 	if err := installer.CreateCluster(ctx, installDir, release, cmd.Root().Writer, cmd.Root().ErrWriter); err != nil {
 		return err
 	}
-	return saveClusterRecord(clusterDir, clusterRecord{Platform: platformAWS, Phase: phaseInstalled})
+	record.Phase = phaseInstalled
+	return saveClusterRecord(clusterDir, record)
 }

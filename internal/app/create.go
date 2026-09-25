@@ -80,6 +80,9 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if err != nil {
 		return err
 	}
+	if err := requireTrackedClusters(st, opts); err != nil {
+		return err
+	}
 	st.LastRelease = opts.Release
 	if err := saveState(dirs.State, st); err != nil {
 		return err
@@ -89,11 +92,13 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 		return err
 	}
 
-	if err := ensureMgmtCluster(ctx, cmd, dirs, opts); err != nil {
-		return err
-	}
+	// Track the clusters before creating them, so that incomplete ones can
+	// be destroyed.
 	st.MgmtCluster = opts.Name
 	if err := saveState(dirs.State, st); err != nil {
+		return err
+	}
+	if err := ensureMgmtCluster(ctx, cmd, dirs, opts); err != nil {
 		return err
 	}
 
@@ -111,14 +116,26 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	}); err != nil {
 		return err
 	}
-	if err := ensureHostedCluster(ctx, cmd.Root().Writer, hs, dirs, opts); err != nil {
-		return err
-	}
 	st.HostedCluster = opts.HostedName
 	if err := saveState(dirs.State, st); err != nil {
 		return err
 	}
+	if err := ensureHostedCluster(ctx, cmd.Root().Writer, hs, dirs, opts); err != nil {
+		return err
+	}
 	_, _ = fmt.Fprintln(cmd.Root().Writer, "Done, use the hosted cluster with:\n  export KUBECONFIG=$(hyperctl kubeconfig)")
+	return nil
+}
+
+// requireTrackedClusters fails if create would replace a tracked cluster, as
+// only one management and one hosted cluster are supported.
+func requireTrackedClusters(st state, opts createOptions) error {
+	if st.MgmtCluster != "" && st.MgmtCluster != opts.Name {
+		return fmt.Errorf("management cluster %s exists, destroy it first", st.MgmtCluster)
+	}
+	if st.HostedCluster != "" && st.HostedCluster != opts.HostedName {
+		return fmt.Errorf("hosted cluster %s exists, destroy it first", st.HostedCluster)
+	}
 	return nil
 }
 
@@ -144,7 +161,7 @@ func awsCredentialsFile() (string, error) {
 // interactive and falls back to defaults otherwise. The SSH key is only asked
 // once and then saved to the config file.
 func resolveCreateOptions(ctx context.Context, cmd *cli.Command, deps Deps, dirs xdg.Dirs, st state, cfg config) (createOptions, error) {
-	defaults, err := defaultCreateOptions(deps, st, cfg)
+	defaults, err := defaultCreateOptions(deps, dirs, st, cfg)
 	if err != nil {
 		return createOptions{}, err
 	}
@@ -156,7 +173,7 @@ func resolveCreateOptions(ctx context.Context, cmd *cli.Command, deps Deps, dirs
 		PullSecret: flagOr(cmd, "pull-secret", defaults.PullSecret),
 		SSHKey:     flagOr(cmd, "ssh-key", defaults.SSHKey),
 		OIDCBucket: flagOr(cmd, "oidc-bucket", defaults.OIDCBucket),
-		HostedName: flagOr(cmd, "hosted-name", ""),
+		HostedName: flagOr(cmd, "hosted-name", defaults.HostedName),
 	}
 	if deps.Interactive {
 		askSSHKey := !cmd.IsSet("ssh-key") && cfg.SSHKey == nil
@@ -201,8 +218,8 @@ func resolveCreateOptions(ctx context.Context, cmd *cli.Command, deps Deps, dirs
 }
 
 // defaultCreateOptions returns the built-in defaults, overridden by the
-// config file and the last used release.
-func defaultCreateOptions(deps Deps, st state, cfg config) (createOptions, error) {
+// config file, the last used release and the tracked clusters.
+func defaultCreateOptions(deps Deps, dirs xdg.Dirs, st state, cfg config) (createOptions, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return createOptions{}, err
@@ -221,6 +238,22 @@ func defaultCreateOptions(deps Deps, st state, cfg config) (createOptions, error
 	if cfg.SSHKey != nil {
 		opts.SSHKey = *cfg.SSHKey
 	}
+	if st.MgmtCluster == "" {
+		return opts, nil
+	}
+
+	// A tracked management cluster determines the settings of its hosted
+	// cluster.
+	opts.Name = st.MgmtCluster
+	opts.HostedName = st.HostedCluster
+	record, found, err := loadClusterRecord(clusterDir(dirs, st.MgmtCluster))
+	if err != nil || !found {
+		return opts, err
+	}
+	opts.Release = record.Release
+	opts.Region = record.Region
+	opts.BaseDomain = record.BaseDomain
+	opts.PullSecret = record.PullSecret
 	return opts, nil
 }
 
