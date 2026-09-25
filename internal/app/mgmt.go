@@ -32,7 +32,7 @@ func ensureMgmtCluster(ctx context.Context, cmd *cli.Command, dirs xdg.Dirs, opt
 // installMgmtCluster extracts the installer for the release and installs the
 // management cluster, tracking progress in the cluster record.
 func installMgmtCluster(ctx context.Context, cmd *cli.Command, dirs xdg.Dirs, opts createOptions) error {
-	release := ocp.Release{Version: opts.Release}
+	release := ocp.ParseRelease(opts.Release)
 
 	pullSecret, err := os.ReadFile(opts.PullSecret)
 	if err != nil {

@@ -28,6 +28,8 @@ type Deps struct {
 	AWS AWSAccount
 	// DefaultRegion is the region of the active AWS profile, if any.
 	DefaultRegion string
+	// ReleasesURL is the base URL of the release controller.
+	ReleasesURL string
 	// Interactive enables prompts for values not given as flags.
 	Interactive bool
 	Stdout      io.Writer
@@ -47,6 +49,7 @@ func New(deps Deps) *cli.Command {
 			createCommand(deps),
 			destroyCommand(deps),
 			kubeconfigCommand(),
+			releasesCommand(deps),
 			statusCommand(),
 		},
 	}

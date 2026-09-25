@@ -12,6 +12,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/linkvt/hyperctl/internal/hypershift"
+	"github.com/linkvt/hyperctl/internal/releases"
 	"github.com/linkvt/hyperctl/internal/xdg"
 )
 
@@ -34,7 +35,7 @@ func createCommand(deps Deps) *cli.Command {
 		Name:  "create",
 		Usage: "Create the management cluster",
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "release", Usage: "OCP release version, e.g. 5.1.0-ec.0"},
+			&cli.StringFlag{Name: "release", Usage: "OCP release version, e.g. 5.1.0-ec.0, or release image pull spec (default: last used)"},
 			&cli.StringFlag{Name: "region", Usage: "AWS region (default: region of the AWS profile)"},
 			&cli.StringFlag{Name: "base-domain", Usage: "Route53 base domain (default: " + defaultBaseDomain + ")"},
 			&cli.StringFlag{Name: "name", Usage: "Management cluster name (default: $USER-karpenter)"},
@@ -206,7 +207,7 @@ func resolveCreateOptions(ctx context.Context, cmd *cli.Command, deps Deps, dirs
 	}
 	if deps.Interactive {
 		askSSHKey := !cmd.IsSet("ssh-key") && cfg.SSHKey == nil
-		if err := promptCreateOptions(ctx, cmd, &opts, askSSHKey, !cmd.Bool("yes")); err != nil {
+		if err := promptCreateOptions(ctx, cmd, releases.Client{BaseURL: deps.ReleasesURL}, &opts, askSSHKey, !cmd.Bool("yes")); err != nil {
 			return createOptions{}, err
 		}
 		if askSSHKey {

@@ -10,19 +10,28 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/urfave/cli/v3"
+
+	"github.com/linkvt/hyperctl/internal/releases"
 )
 
 // promptCreateOptions asks for every value not given as a flag, prefilled
 // with the current value, and for the SSH key if askSSHKey is set. With
 // confirm set, it asks for confirmation of the summary.
-func promptCreateOptions(ctx context.Context, cmd *cli.Command, opts *createOptions, askSSHKey, confirm bool) error {
+func promptCreateOptions(ctx context.Context, cmd *cli.Command, client releases.Client, opts *createOptions, askSSHKey, confirm bool) error {
+	if !cmd.IsSet("release") {
+		release, err := promptRelease(ctx, client, opts.Release)
+		if err != nil {
+			return err
+		}
+		opts.Release = release
+	}
+
 	var fields []huh.Field
 	for _, input := range []struct {
 		flag  string
 		title string
 		value *string
 	}{
-		{"release", "Release (e.g. 5.1.0-ec.0)", &opts.Release},
 		{"region", "AWS region", &opts.Region},
 		{"base-domain", "Base domain", &opts.BaseDomain},
 		{"name", "Management cluster name", &opts.Name},
@@ -62,6 +71,79 @@ func promptCreateOptions(ctx context.Context, cmd *cli.Command, opts *createOpti
 		return nil
 	}
 	return confirmCreateOptions(ctx, *opts)
+}
+
+const (
+	releaseLastUsed = "last-used"
+	releaseBrowse   = "browse"
+	releaseManual   = "manual"
+)
+
+// promptRelease lets the user keep the last used release, browse the release
+// controller or enter a version or pull spec.
+func promptRelease(ctx context.Context, client releases.Client, lastUsed string) (string, error) {
+	source := releaseBrowse
+	var options []huh.Option[string]
+	if lastUsed != "" {
+		source = releaseLastUsed
+		options = append(options, huh.NewOption("Last used: "+lastUsed, releaseLastUsed))
+	}
+	options = append(options,
+		huh.NewOption("Browse the release controller", releaseBrowse),
+		huh.NewOption("Enter a version or pull spec", releaseManual),
+	)
+	if err := huh.NewForm(huh.NewGroup(
+		huh.NewSelect[string]().Title("Release").Options(options...).Value(&source),
+	)).RunWithContext(ctx); err != nil {
+		return "", err
+	}
+
+	switch source {
+	case releaseLastUsed:
+		return lastUsed, nil
+	case releaseManual:
+		release := lastUsed
+		err := huh.NewForm(huh.NewGroup(
+			huh.NewInput().Title("Release version (e.g. 5.1.0-ec.0) or pull spec").Value(&release).Validate(requireValue),
+		)).RunWithContext(ctx)
+		return release, err
+	default:
+		return browseReleases(ctx, client)
+	}
+}
+
+// browseReleases lets the user pick a release stream and one of its releases.
+func browseReleases(ctx context.Context, client releases.Client) (string, error) {
+	streams, err := client.Streams(ctx)
+	if err != nil {
+		return "", err
+	}
+	var stream string
+	var all bool
+	if err := huh.NewForm(huh.NewGroup(
+		huh.NewSelect[string]().Title("Release stream").Options(huh.NewOptions(streams...)...).Height(15).Value(&stream),
+		huh.NewConfirm().Title("Include releases that are not accepted?").Value(&all),
+	)).RunWithContext(ctx); err != nil {
+		return "", err
+	}
+
+	tags, err := client.Tags(ctx, stream)
+	if err != nil {
+		return "", err
+	}
+	tags = filterTags(tags, all)
+	if len(tags) == 0 {
+		return "", fmt.Errorf("no releases in stream %s", stream)
+	}
+	var options []huh.Option[string]
+	for _, tag := range tags {
+		options = append(options, huh.NewOption(tag.Name+" ("+tag.Phase+")", tag.PullSpec))
+	}
+	var pullSpec string
+	err = huh.NewForm(huh.NewGroup(
+		huh.NewSelect[string]().Title("Release in " + stream).Options(options...).Height(15).Value(&pullSpec),
+	)).RunWithContext(ctx)
+	return pullSpec, err
 }
 
 // confirmCreateOptions shows a summary and fails unless the user confirms.

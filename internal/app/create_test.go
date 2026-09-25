@@ -197,6 +197,25 @@ func TestCreateRequiresReleaseWhenNotInteractive(t *testing.T) {
 	}
 }
 
+func TestCreateAcceptsReleasePullSpec(t *testing.T) {
+	env := newTestEnv(t)
+	pullSpec := "registry.ci.openshift.org/ocp/release-5:5.1.0-0.nightly-2026-09-25-074941"
+
+	env.run(t, "create",
+		"--release", pullSpec,
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	)
+
+	if got := env.installerCalls(t)[0].releaseOverride; got != pullSpec {
+		t.Errorf("release override: got %q, want %q", got, pullSpec)
+	}
+	if want := "--release-image " + pullSpec; !strings.Contains(env.hypershiftCall(t, "create cluster ").args, want) {
+		t.Errorf("expected hosted cluster with %q", want)
+	}
+}
+
 func TestCreateAddsSSHKeyToInstallConfig(t *testing.T) {
 	env := newTestEnv(t)
 	sshKey := filepath.Join(env.home, "id_ed25519.pub")

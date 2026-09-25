@@ -139,7 +139,7 @@ func destroyMgmtCluster(ctx context.Context, cmd *cli.Command, deps Deps, dirs x
 		// Installation never started, nothing to destroy.
 		return os.RemoveAll(dir)
 	}
-	installer, err := ocp.EnsureInstaller(ctx, filepath.Join(dirs.Cache, "releases"), ocp.Release{Version: record.Release}, record.PullSecret)
+	installer, err := ocp.EnsureInstaller(ctx, filepath.Join(dirs.Cache, "releases"), ocp.ParseRelease(record.Release), record.PullSecret)
 	if err != nil {
 		return err
 	}

@@ -76,6 +76,7 @@ type testEnv struct {
 	pullSecret    string
 	aws           *fakeAWS
 	defaultRegion string
+	releasesURL   string
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -141,6 +142,7 @@ func (e *testEnv) runErr(t *testing.T, args ...string) (string, error) {
 	cmd := app.New(app.Deps{
 		AWS:           e.aws,
 		DefaultRegion: e.defaultRegion,
+		ReleasesURL:   e.releasesURL,
 		Stdout:        &out,
 	})
 	err := cmd.Run(context.Background(), append([]string{"hyperctl"}, args...))

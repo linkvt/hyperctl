@@ -17,7 +17,7 @@ type Installer struct {
 // EnsureInstaller returns the openshift-install binary for the release,
 // extracting it into cacheDir unless it is already cached.
 func EnsureInstaller(ctx context.Context, cacheDir string, release Release, pullSecretPath string) (Installer, error) {
-	dir := filepath.Join(cacheDir, release.Version)
+	dir := filepath.Join(cacheDir, release.Name)
 	installer := Installer{Path: filepath.Join(dir, "openshift-install")}
 	if _, err := os.Stat(installer.Path); err == nil {
 		return installer, nil
@@ -28,7 +28,7 @@ func EnsureInstaller(ctx context.Context, cacheDir string, release Release, pull
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return Installer{}, err
 	}
-	tmpDir, err := os.MkdirTemp(cacheDir, release.Version+".tmp-")
+	tmpDir, err := os.MkdirTemp(cacheDir, release.Name+".tmp-")
 	if err != nil {
 		return Installer{}, err
 	}
@@ -38,10 +38,10 @@ func EnsureInstaller(ctx context.Context, cacheDir string, release Release, pull
 		"--command=openshift-install",
 		"--to="+tmpDir,
 		"--registry-config="+pullSecretPath,
-		release.PullSpec(),
+		release.PullSpec,
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return Installer{}, fmt.Errorf("extracting openshift-install from %s: %w\n%s", release.PullSpec(), err, out)
+		return Installer{}, fmt.Errorf("extracting openshift-install from %s: %w\n%s", release.PullSpec, err, out)
 	}
 	if err := os.Rename(tmpDir, dir); err != nil {
 		return Installer{}, err
@@ -53,7 +53,7 @@ func EnsureInstaller(ctx context.Context, cacheDir string, release Release, pull
 func (i Installer) CreateCluster(ctx context.Context, installDir string, release Release, stdout, stderr io.Writer) error {
 	cmd := exec.CommandContext(ctx, i.Path, "create", "cluster", "--dir", installDir)
 	cmd.Env = append(os.Environ(),
-		"OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE="+release.PullSpec(),
+		"OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE="+release.PullSpec,
 		"OPENSHIFT_INSTALL_EXPERIMENTAL_DISABLE_IMAGE_POLICY=true",
 	)
 	cmd.Stdout = stdout

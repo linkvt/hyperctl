@@ -42,7 +42,7 @@ func ensureHostedCluster(ctx context.Context, w io.Writer, hs hypershift.CLI, di
 		Region:       opts.Region,
 		BaseDomain:   opts.BaseDomain,
 		PullSecret:   opts.PullSecret,
-		ReleaseImage: ocp.Release{Version: opts.Release}.PullSpec(),
+		ReleaseImage: ocp.ParseRelease(opts.Release).PullSpec,
 		SSHKey:       opts.SSHKey,
 	}); err != nil {
 		return err

@@ -19,20 +19,29 @@ func resolveHypershift(ctx context.Context, cmd *cli.Command, deps Deps, dirs xd
 	if path == "" {
 		path, _ = exec.LookPath("hypershift")
 	}
-	if path == "" && deps.Interactive {
-		var err error
-		if path, err = promptHypershiftPath(ctx); err != nil {
-			return "", err
-		}
-		cfg.Hypershift = path
-		if err := saveConfig(dirs.Config, cfg); err != nil {
-			return "", err
-		}
+	if path != "" {
+		return verifyHypershift(ctx, path)
 	}
-	if path == "" {
+	if !deps.Interactive {
 		return "", errors.New("hypershift binary not found in PATH, build it from github.com/openshift/hypershift (make build) and pass --hypershift or set hypershift in the config file")
 	}
 
+	path, err := promptHypershiftPath(ctx)
+	if err != nil {
+		return "", err
+	}
+	if path, err = verifyHypershift(ctx, path); err != nil {
+		return "", err
+	}
+	cfg.Hypershift = path
+	if err := saveConfig(dirs.Config, cfg); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// verifyHypershift expands the path and checks that the binary runs.
+func verifyHypershift(ctx context.Context, path string) (string, error) {
 	path, err := expandHome(path)
 	if err != nil {
 		return "", err

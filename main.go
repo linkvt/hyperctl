@@ -11,6 +11,7 @@ import (
 
 	"github.com/linkvt/hyperctl/internal/app"
 	"github.com/linkvt/hyperctl/internal/awsaccount"
+	"github.com/linkvt/hyperctl/internal/releases"
 )
 
 func main() {
@@ -31,6 +32,7 @@ func run(ctx context.Context) error {
 	cmd := app.New(app.Deps{
 		AWS:           awsaccount.New(awsConfig),
 		DefaultRegion: awsConfig.Region,
+		ReleasesURL:   releases.DefaultURL,
 		Interactive:   term.IsTerminal(int(os.Stdin.Fd())),
 		Stdout:        os.Stdout,
 		Stderr:        os.Stderr,
