@@ -12,8 +12,8 @@ import (
 )
 
 // promptCreateOptions asks for every value not given as a flag, prefilled
-// with the current value.
-func promptCreateOptions(ctx context.Context, cmd *cli.Command, opts *createOptions) error {
+// with the current value, and for the SSH key if askSSHKey is set.
+func promptCreateOptions(ctx context.Context, cmd *cli.Command, opts *createOptions, askSSHKey bool) error {
 	var fields []huh.Field
 	for _, input := range []struct {
 		flag  string
@@ -31,7 +31,7 @@ func promptCreateOptions(ctx context.Context, cmd *cli.Command, opts *createOpti
 		}
 		fields = append(fields, huh.NewInput().Title(input.title).Value(input.value).Validate(requireValue))
 	}
-	if !cmd.IsSet("ssh-key") {
+	if askSSHKey {
 		sshKeys, err := sshPublicKeys()
 		if err != nil {
 			return err

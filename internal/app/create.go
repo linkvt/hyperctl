@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -54,8 +55,20 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if err != nil {
 		return err
 	}
-	opts, err := resolveCreateOptions(ctx, cmd, deps)
+	st, err := loadState(dirs.State)
 	if err != nil {
+		return err
+	}
+	cfg, err := loadConfig(dirs.Config)
+	if err != nil {
+		return err
+	}
+	opts, err := resolveCreateOptions(ctx, cmd, deps, dirs, st, cfg)
+	if err != nil {
+		return err
+	}
+	st.LastRelease = opts.Release
+	if err := saveState(dirs.State, st); err != nil {
 		return err
 	}
 	clusterDir := clusterDir(dirs, opts.Name)
@@ -67,7 +80,8 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	switch {
 	case found && record.Phase == phaseInstalled:
 		_, _ = fmt.Fprintf(cmd.Root().Writer, "Management cluster %s is already installed\n", opts.Name)
-		return saveState(dirs.State, state{MgmtCluster: opts.Name})
+		st.MgmtCluster = opts.Name
+		return saveState(dirs.State, st)
 	case found:
 		return fmt.Errorf("previous installation of management cluster %s did not complete, destroy it first", opts.Name)
 	}
@@ -75,13 +89,15 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if err := installMgmtCluster(ctx, cmd, dirs, opts); err != nil {
 		return err
 	}
-	return saveState(dirs.State, state{MgmtCluster: opts.Name})
+	st.MgmtCluster = opts.Name
+	return saveState(dirs.State, st)
 }
 
 // resolveCreateOptions takes values from flags, prompts for missing ones when
-// interactive and falls back to defaults otherwise.
-func resolveCreateOptions(ctx context.Context, cmd *cli.Command, deps Deps) (createOptions, error) {
-	defaults, err := defaultCreateOptions(deps)
+// interactive and falls back to defaults otherwise. The SSH key is only asked
+// once and then saved to the config file.
+func resolveCreateOptions(ctx context.Context, cmd *cli.Command, deps Deps, dirs xdg.Dirs, st state, cfg config) (createOptions, error) {
+	defaults, err := defaultCreateOptions(deps, st, cfg)
 	if err != nil {
 		return createOptions{}, err
 	}
@@ -94,9 +110,23 @@ func resolveCreateOptions(ctx context.Context, cmd *cli.Command, deps Deps) (cre
 		SSHKey:     flagOr(cmd, "ssh-key", defaults.SSHKey),
 	}
 	if deps.Interactive {
-		if err := promptCreateOptions(ctx, cmd, &opts); err != nil {
+		askSSHKey := !cmd.IsSet("ssh-key") && cfg.SSHKey == nil
+		if err := promptCreateOptions(ctx, cmd, &opts, askSSHKey); err != nil {
 			return createOptions{}, err
 		}
+		if askSSHKey {
+			cfg.SSHKey = &opts.SSHKey
+			if err := saveConfig(dirs.Config, cfg); err != nil {
+				return createOptions{}, err
+			}
+		}
+	}
+	// Paths from the config file or prompts are not expanded by a shell.
+	if opts.PullSecret, err = expandHome(opts.PullSecret); err != nil {
+		return createOptions{}, err
+	}
+	if opts.SSHKey, err = expandHome(opts.SSHKey); err != nil {
+		return createOptions{}, err
 	}
 
 	var missing []string
@@ -117,21 +147,26 @@ func resolveCreateOptions(ctx context.Context, cmd *cli.Command, deps Deps) (cre
 	return opts, nil
 }
 
-func defaultCreateOptions(deps Deps) (createOptions, error) {
+// defaultCreateOptions returns the built-in defaults, overridden by the
+// config file and the last used release.
+func defaultCreateOptions(deps Deps, st state, cfg config) (createOptions, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return createOptions{}, err
 	}
-	var name string
-	if user := os.Getenv("USER"); user != "" {
-		name = user + "-karpenter"
+	opts := createOptions{
+		Release:    st.LastRelease,
+		Region:     cmp.Or(cfg.Region, deps.DefaultRegion),
+		BaseDomain: cmp.Or(cfg.BaseDomain, defaultBaseDomain),
+		PullSecret: cmp.Or(cfg.PullSecret, filepath.Join(home, ".openshift", "pull-secret-latest.json")),
 	}
-	return createOptions{
-		Region:     deps.DefaultRegion,
-		BaseDomain: defaultBaseDomain,
-		Name:       name,
-		PullSecret: filepath.Join(home, ".openshift", "pull-secret-latest.json"),
-	}, nil
+	if user := os.Getenv("USER"); user != "" {
+		opts.Name = user + "-karpenter"
+	}
+	if cfg.SSHKey != nil {
+		opts.SSHKey = *cfg.SSHKey
+	}
+	return opts, nil
 }
 
 func flagOr(cmd *cli.Command, name, fallback string) string {
@@ -139,6 +174,19 @@ func flagOr(cmd *cli.Command, name, fallback string) string {
 		return cmd.String(name)
 	}
 	return fallback
+}
+
+// expandHome replaces a leading "~/" with the home directory.
+func expandHome(path string) (string, error) {
+	rest, ok := strings.CutPrefix(path, "~/")
+	if !ok {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, rest), nil
 }
 
 // installMgmtCluster extracts the installer for the release and installs the
@@ -185,11 +233,11 @@ func installMgmtCluster(ctx context.Context, cmd *cli.Command, dirs xdg.Dirs, op
 		}
 	}
 
-	if err := saveClusterRecord(clusterDir, clusterRecord{Phase: phaseInstalling}); err != nil {
+	if err := saveClusterRecord(clusterDir, clusterRecord{Platform: platformAWS, Phase: phaseInstalling}); err != nil {
 		return err
 	}
 	if err := installer.CreateCluster(ctx, installDir, release, cmd.Root().Writer, cmd.Root().ErrWriter); err != nil {
 		return err
 	}
-	return saveClusterRecord(clusterDir, clusterRecord{Phase: phaseInstalled})
+	return saveClusterRecord(clusterDir, clusterRecord{Platform: platformAWS, Phase: phaseInstalled})
 }

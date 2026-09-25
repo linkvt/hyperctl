@@ -12,6 +12,7 @@ import (
 // state is what hyperctl remembers between runs.
 type state struct {
 	MgmtCluster string `json:"mgmtCluster,omitempty"`
+	LastRelease string `json:"lastRelease,omitempty"`
 }
 
 // clusterPhase is the lifecycle phase of a management cluster.
@@ -22,9 +23,14 @@ const (
 	phaseInstalled  clusterPhase = "Installed"
 )
 
+// platformAWS is the only supported platform. Records carry the platform so
+// that further platforms can be added without migrating them.
+const platformAWS = "aws"
+
 // clusterRecord is what hyperctl remembers about a management cluster.
 type clusterRecord struct {
-	Phase clusterPhase `json:"phase"`
+	Platform string       `json:"platform"`
+	Phase    clusterPhase `json:"phase"`
 }
 
 func loadState(stateDir string) (state, error) {

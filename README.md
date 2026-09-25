@@ -35,9 +35,20 @@ hyperctl follows the XDG Base Directory Specification on macOS and Linux:
 
 | Directory | Default | Content |
 |---|---|---|
+| Config | `~/.config/hyperctl/config.yaml` | User defaults, see below |
 | Data | `~/.local/share/hyperctl` | Installer directories and kubeconfigs, needed to destroy clusters |
-| State | `~/.local/state/hyperctl` | Current cluster |
+| State | `~/.local/state/hyperctl` | Current cluster, last used release |
 | Cache | `~/.cache/hyperctl` | `openshift-install` binaries per release |
+
+Config values override built-in defaults, flags override config values. The
+SSH key is asked once and saved; `sshKey: ""` disables it.
+
+```yaml
+region: us-east-1
+baseDomain: autoscaling-dev.devcluster.openshift.com
+pullSecret: ~/.openshift/pull-secret-latest.json
+sshKey: ~/.ssh/id_ed25519.pub
+```
 
 ## Development
 

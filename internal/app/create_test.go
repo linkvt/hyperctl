@@ -103,6 +103,90 @@ func TestCreateUsesDefaultsForMissingValues(t *testing.T) {
 	}
 }
 
+func TestCreateUsesConfigFileDefaults(t *testing.T) {
+	env := newTestEnv(t)
+	env.defaultRegion = "us-east-2"
+	sshKey := filepath.Join(env.home, "id_ed25519.pub")
+	writeFile(t, sshKey, "ssh-ed25519 AAAA test@example.com\n", 0o644)
+	configPath := filepath.Join(env.home, ".config", "hyperctl", "config.yaml")
+	mustMkdir(t, filepath.Dir(configPath))
+	writeFile(t, configPath, `region: eu-west-1
+baseDomain: config.example.com
+pullSecret: `+env.pullSecret+`
+sshKey: `+sshKey+`
+`, 0o600)
+
+	env.run(t, "create", "--release", "5.1.0-ec.0", "--name", "test-mgmt")
+
+	var installConfig struct {
+		BaseDomain string `json:"baseDomain"`
+		Platform   struct {
+			AWS struct {
+				Region string `json:"region"`
+			} `json:"aws"`
+		} `json:"platform"`
+		PullSecret string `json:"pullSecret"`
+		SSHKey     string `json:"sshKey"`
+	}
+	if err := yaml.Unmarshal([]byte(env.installerCalls(t)[0].installConfig), &installConfig); err != nil {
+		t.Fatalf("parsing install-config: %v", err)
+	}
+	if installConfig.Platform.AWS.Region != "eu-west-1" {
+		t.Errorf("platform.aws.region: got %q", installConfig.Platform.AWS.Region)
+	}
+	if installConfig.BaseDomain != "config.example.com" {
+		t.Errorf("baseDomain: got %q", installConfig.BaseDomain)
+	}
+	if installConfig.PullSecret != testPullSecret {
+		t.Errorf("pullSecret: got %q", installConfig.PullSecret)
+	}
+	if installConfig.SSHKey != "ssh-ed25519 AAAA test@example.com" {
+		t.Errorf("sshKey: got %q", installConfig.SSHKey)
+	}
+}
+
+func TestCreateExpandsHomeInConfigPaths(t *testing.T) {
+	env := newTestEnv(t)
+	mustMkdir(t, filepath.Join(env.home, ".secrets"))
+	writeFile(t, filepath.Join(env.home, ".secrets", "pull-secret.json"), testPullSecret, 0o600)
+	configPath := filepath.Join(env.home, ".config", "hyperctl", "config.yaml")
+	mustMkdir(t, filepath.Dir(configPath))
+	writeFile(t, configPath, "pullSecret: ~/.secrets/pull-secret.json\n", 0o600)
+
+	env.run(t, "create", "--release", "5.1.0-ec.0", "--region", "eu-central-1", "--name", "test-mgmt")
+
+	var installConfig struct {
+		PullSecret string `json:"pullSecret"`
+	}
+	if err := yaml.Unmarshal([]byte(env.installerCalls(t)[0].installConfig), &installConfig); err != nil {
+		t.Fatalf("parsing install-config: %v", err)
+	}
+	if installConfig.PullSecret != testPullSecret {
+		t.Errorf("pullSecret: got %q", installConfig.PullSecret)
+	}
+}
+
+func TestCreateDefaultsToLastUsedRelease(t *testing.T) {
+	env := newTestEnv(t)
+	env.run(t, "create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "first",
+		"--pull-secret", env.pullSecret,
+	)
+
+	env.run(t, "create",
+		"--region", "eu-central-1",
+		"--name", "second",
+		"--pull-secret", env.pullSecret,
+	)
+
+	calls := env.installerCalls(t)
+	if want := "quay.io/openshift-release-dev/ocp-release:5.1.0-ec.0-x86_64"; calls[1].releaseOverride != want {
+		t.Errorf("release override: got %q, want %q", calls[1].releaseOverride, want)
+	}
+}
+
 func TestCreateRequiresReleaseWhenNotInteractive(t *testing.T) {
 	env := newTestEnv(t)
 
