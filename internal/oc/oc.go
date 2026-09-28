@@ -23,8 +23,7 @@ func HostedClusterAvailable(ctx context.Context, kubeconfig, name string) (strin
 		"-o", `jsonpath={.status.conditions[?(@.type=="Available")].status}`,
 		"--request-timeout=10s")
 	out, err := cmd.Output()
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		return "", fmt.Errorf("getting hosted cluster %s: %w: %s", name, err, strings.TrimSpace(string(exitErr.Stderr)))
 	}
 	if err != nil {

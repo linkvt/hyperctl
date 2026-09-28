@@ -53,8 +53,7 @@ func (a *Account) CallerIdentity(ctx context.Context) (string, error) {
 // SpotRoleExists reports whether the EC2 Spot service-linked role exists.
 func (a *Account) SpotRoleExists(ctx context.Context) (bool, error) {
 	_, err := a.iam.GetRole(ctx, &iam.GetRoleInput{RoleName: aws.String(spotServiceLinkedRole)})
-	var notFound *iamtypes.NoSuchEntityException
-	if errors.As(err, &notFound) {
+	if _, ok := errors.AsType[*iamtypes.NoSuchEntityException](err); ok {
 		return false, nil
 	}
 	if err != nil {
@@ -66,8 +65,7 @@ func (a *Account) SpotRoleExists(ctx context.Context) (bool, error) {
 // BucketRegion returns the region of a bucket and whether it exists.
 func (a *Account) BucketRegion(ctx context.Context, bucket string) (string, bool, error) {
 	region, err := manager.GetBucketRegion(ctx, a.s3, bucket)
-	var notFound manager.BucketNotFound
-	if errors.As(err, &notFound) {
+	if _, ok := errors.AsType[manager.BucketNotFound](err); ok {
 		return "", false, nil
 	}
 	if err != nil {
