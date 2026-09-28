@@ -13,16 +13,23 @@ import (
 func releasesCommand(deps Deps) *cli.Command {
 	return &cli.Command{
 		Name:      "releases",
-		Usage:     "List release streams, or the accepted releases of a stream",
+		Usage:     "List release streams with accepted releases, or the accepted releases of a stream",
 		ArgsUsage: "[stream]",
 		Flags: []cli.Flag{
-			&cli.BoolFlag{Name: "all", Usage: "Include releases that are not accepted"},
+			&cli.BoolFlag{Name: "all", Usage: "Include releases and streams without accepted releases"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			client := releases.Client{BaseURL: deps.ReleasesURL}
+			// Progress goes to stderr, keeping stdout for the results.
+			p := progress{w: cmd.Root().ErrWriter, interactive: deps.Interactive}
 			stream := cmd.Args().First()
 			if stream == "" {
-				streams, err := client.Streams(ctx)
+				var streams []string
+				err := p.wait(ctx, "Loading release streams", func(ctx context.Context) error {
+					var err error
+					streams, err = client.Streams(ctx, cmd.Bool("all"))
+					return err
+				})
 				if err != nil {
 					return err
 				}
@@ -32,7 +39,12 @@ func releasesCommand(deps Deps) *cli.Command {
 				return nil
 			}
 
-			tags, err := client.Tags(ctx, stream)
+			var tags []releases.Tag
+			err := p.wait(ctx, "Loading releases of "+stream, func(ctx context.Context) error {
+				var err error
+				tags, err = client.Tags(ctx, stream)
+				return err
+			})
 			if err != nil {
 				return err
 			}

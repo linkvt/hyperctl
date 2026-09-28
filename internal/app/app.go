@@ -30,7 +30,8 @@ type Deps struct {
 	DefaultRegion string
 	// ReleasesURL is the base URL of the release controller.
 	ReleasesURL string
-	// Interactive enables prompts for values not given as flags.
+	// Interactive enables prompts for values not given as flags and
+	// spinners, it requires a terminal.
 	Interactive bool
 	Stdout      io.Writer
 	Stderr      io.Writer

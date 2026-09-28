@@ -12,14 +12,15 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/linkvt/hyperctl/internal/releases"
+	"github.com/linkvt/hyperctl/internal/tui"
 )
 
 // promptCreateOptions asks for every value not given as a flag, prefilled
 // with the current value, and for the SSH key if askSSHKey is set. With
 // confirm set, it asks for confirmation of the summary.
-func promptCreateOptions(ctx context.Context, cmd *cli.Command, client releases.Client, opts *createOptions, askSSHKey, confirm bool) error {
+func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, client releases.Client, opts *createOptions, askSSHKey, confirm bool) error {
 	if !cmd.IsSet("release") {
-		release, err := promptRelease(ctx, client, opts.Release)
+		release, err := promptRelease(ctx, p, client, opts.Release)
 		if err != nil {
 			return err
 		}
@@ -81,7 +82,7 @@ const (
 
 // promptRelease lets the user keep the last used release, browse the release
 // controller or enter a version or pull spec.
-func promptRelease(ctx context.Context, client releases.Client, lastUsed string) (string, error) {
+func promptRelease(ctx context.Context, p progress, client releases.Client, lastUsed string) (string, error) {
 	source := releaseBrowse
 	var options []huh.Option[string]
 	if lastUsed != "" {
@@ -108,26 +109,45 @@ func promptRelease(ctx context.Context, client releases.Client, lastUsed string)
 		)).RunWithContext(ctx)
 		return release, err
 	default:
-		return browseReleases(ctx, client)
+		return browseReleases(ctx, p, client)
 	}
 }
 
-// browseReleases lets the user pick a release stream and one of its releases.
-func browseReleases(ctx context.Context, client releases.Client) (string, error) {
-	streams, err := client.Streams(ctx)
-	if err != nil {
-		return "", err
-	}
-	var stream string
+// browseReleases lets the user pick a release: accepted ones only unless
+// all phases are chosen, then a stream and one of its releases.
+func browseReleases(ctx context.Context, p progress, client releases.Client) (string, error) {
 	var all bool
 	if err := huh.NewForm(huh.NewGroup(
-		huh.NewSelect[string]().Title("Release stream").Options(huh.NewOptions(streams...)...).Height(15).Value(&stream),
-		huh.NewConfirm().Title("Include releases that are not accepted?").Value(&all),
+		huh.NewSelect[bool]().Title("Releases").Options(
+			huh.NewOption("Accepted only", false),
+			huh.NewOption("All phases (also Ready and Rejected)", true),
+		).Value(&all),
 	)).RunWithContext(ctx); err != nil {
 		return "", err
 	}
 
-	tags, err := client.Tags(ctx, stream)
+	var streams []string
+	err := p.wait(ctx, "Loading release streams", func(ctx context.Context) error {
+		var err error
+		streams, err = client.Streams(ctx, all)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	var stream string
+	if err := huh.NewForm(huh.NewGroup(
+		tui.Select(huh.NewSelect[string]().Title("Release stream").Options(huh.NewOptions(streams...)...).Height(15).Value(&stream)),
+	)).RunWithContext(ctx); err != nil {
+		return "", err
+	}
+
+	var tags []releases.Tag
+	err = p.wait(ctx, "Loading releases of "+stream, func(ctx context.Context) error {
+		var err error
+		tags, err = client.Tags(ctx, stream)
+		return err
+	})
 	if err != nil {
 		return "", err
 	}
@@ -141,7 +161,7 @@ func browseReleases(ctx context.Context, client releases.Client) (string, error)
 	}
 	var pullSpec string
 	err = huh.NewForm(huh.NewGroup(
-		huh.NewSelect[string]().Title("Release in " + stream).Options(options...).Height(15).Value(&pullSpec),
+		tui.Select(huh.NewSelect[string]().Title("Release in " + stream).Options(options...).Height(15).Value(&pullSpec)),
 	)).RunWithContext(ctx)
 	return pullSpec, err
 }

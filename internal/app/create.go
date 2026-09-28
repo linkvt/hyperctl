@@ -56,7 +56,12 @@ func createCommand(deps Deps) *cli.Command {
 func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	p := progress{w: cmd.Root().Writer, interactive: deps.Interactive}
 	p.step("Checking prerequisites")
-	identity, err := requireIAMUser(ctx, deps.AWS)
+	var identity string
+	err := p.wait(ctx, "Checking the AWS identity", func(ctx context.Context) error {
+		var err error
+		identity, err = requireIAMUser(ctx, deps.AWS)
+		return err
+	})
 	if err != nil {
 		return err
 	}
@@ -85,7 +90,7 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	}
 	p.done("AWS credentials file %s", credentialsFile)
 
-	opts, err := resolveCreateOptions(ctx, cmd, deps, dirs, st, cfg)
+	opts, err := resolveCreateOptions(ctx, p, cmd, deps, dirs, st, cfg)
 	if err != nil {
 		return err
 	}
@@ -204,7 +209,7 @@ func awsCredentialsFile() (string, error) {
 // resolveCreateOptions takes values from flags, prompts for missing ones when
 // interactive and falls back to defaults otherwise. The SSH key is only asked
 // once and then saved to the config file.
-func resolveCreateOptions(ctx context.Context, cmd *cli.Command, deps Deps, dirs xdg.Dirs, st state, cfg config) (createOptions, error) {
+func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, deps Deps, dirs xdg.Dirs, st state, cfg config) (createOptions, error) {
 	defaults, err := defaultCreateOptions(deps, dirs, st, cfg)
 	if err != nil {
 		return createOptions{}, err
@@ -221,7 +226,7 @@ func resolveCreateOptions(ctx context.Context, cmd *cli.Command, deps Deps, dirs
 	}
 	if deps.Interactive {
 		askSSHKey := !cmd.IsSet("ssh-key") && cfg.SSHKey == nil
-		if err := promptCreateOptions(ctx, cmd, releases.Client{BaseURL: deps.ReleasesURL}, &opts, askSSHKey, !cmd.Bool("yes")); err != nil {
+		if err := promptCreateOptions(ctx, p, cmd, releases.Client{BaseURL: deps.ReleasesURL}, &opts, askSSHKey, !cmd.Bool("yes")); err != nil {
 			return createOptions{}, err
 		}
 		if askSSHKey {

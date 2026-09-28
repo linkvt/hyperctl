@@ -33,7 +33,7 @@ func run(ctx context.Context) error {
 		AWS:           awsaccount.New(awsConfig),
 		DefaultRegion: awsConfig.Region,
 		ReleasesURL:   releases.DefaultURL,
-		Interactive:   term.IsTerminal(int(os.Stdin.Fd())),
+		Interactive:   term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())),
 		Stdout:        os.Stdout,
 		Stderr:        os.Stderr,
 	})

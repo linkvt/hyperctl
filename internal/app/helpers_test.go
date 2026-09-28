@@ -3,6 +3,7 @@ package app_test
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -146,6 +147,7 @@ func (e *testEnv) runErr(t *testing.T, args ...string) (string, error) {
 		DefaultRegion: e.defaultRegion,
 		ReleasesURL:   e.releasesURL,
 		Stdout:        &out,
+		Stderr:        io.Discard,
 	})
 	err := cmd.Run(context.Background(), append([]string{"hyperctl"}, args...))
 	return out.String(), err

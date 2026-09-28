@@ -7,14 +7,31 @@ import (
 	"testing"
 )
 
-func TestReleasesListsStreams(t *testing.T) {
-	env := newTestEnv(t)
-	env.releasesURL = fakeReleaseController(t)
+func TestReleasesListsStreamsNewestFirst(t *testing.T) {
+	tests := map[string]struct {
+		args []string
+		want string
+	}{
+		"with accepted releases": {
+			args: []string{"releases"},
+			want: "5.10.0-0.nightly\n5.1.0-0.nightly\n5-stable\n5-dev-preview\n4-stable\n",
+		},
+		"all": {
+			args: []string{"releases", "--all"},
+			want: "5.10.0-0.nightly\n5.2.0-0.ci\n5.1.0-0.nightly\n5-stable\n5-dev-preview\n4-stable\n",
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			env := newTestEnv(t)
+			env.releasesURL = fakeReleaseController(t)
 
-	out := env.run(t, "releases")
+			out := env.run(t, tc.args...)
 
-	if want := "4-stable\n5-dev-preview\n5.1.0-0.nightly\n"; out != want {
-		t.Errorf("got:\n%s\nwant:\n%s", out, want)
+			if out != tc.want {
+				t.Errorf("got:\n%s\nwant:\n%s", out, tc.want)
+			}
+		})
 	}
 }
 
@@ -60,7 +77,12 @@ func fakeReleaseController(t *testing.T) string {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/releasestreams/all", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"5.1.0-0.nightly":["5.1.0-0.nightly-2026-09-25-000000"],"4-stable":["4.22.16"],"5-dev-preview":["5.1.0-ec.0"]}`))
+		_, _ = w.Write([]byte(`{"5.1.0-0.nightly":["5.1.0-0.nightly-2026-09-25-000000"],"4-stable":["4.22.16"],"5-dev-preview":["5.1.0-ec.0"],
+			"5-stable":["5.0.1"],"5.10.0-0.nightly":["5.10.0-0.nightly-2027-01-01-000000"],"5.2.0-0.ci":["5.2.0-0.ci-2026-09-25-000000"]}`))
+	})
+	mux.HandleFunc("GET /api/v1/releasestreams/accepted", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"5.1.0-0.nightly":["5.1.0-0.nightly-2026-09-24-000000"],"4-stable":["4.22.15"],"5-dev-preview":["5.1.0-ec.0"],
+			"5-stable":["5.0.1"],"5.10.0-0.nightly":["5.10.0-0.nightly-2027-01-01-000000"],"5.2.0-0.ci":[]}`))
 	})
 	mux.HandleFunc("GET /api/v1/releasestream/5.1.0-0.nightly/tags", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"name":"5.1.0-0.nightly","tags":[
