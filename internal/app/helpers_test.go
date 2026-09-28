@@ -43,6 +43,7 @@ d="$HYPERCTL_TEST_LOG/openshift-install-$(ls "$HYPERCTL_TEST_LOG" | grep -c '^op
 mkdir -p "$d"
 echo "$*" > "$d/args"
 [ "$1" = "destroy" ] && exit 0
+echo "level=info msg=fake install" >&2
 printf '%s' "$OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE" > "$d/release-override"
 printf '%s' "$OPENSHIFT_INSTALL_EXPERIMENTAL_DISABLE_IMAGE_POLICY" > "$d/disable-image-policy"
 dir="$4"
@@ -64,6 +65,7 @@ printf '%s' "$KUBECONFIG" > "$d/kubeconfig"
 [ -n "$HYPERCTL_TEST_HYPERSHIFT_FAIL" ] && [ "$1" = "$HYPERCTL_TEST_HYPERSHIFT_FAIL" ] && exit 1
 case "$1 $2" in
   "create kubeconfig") echo "fake hosted kubeconfig" ;;
+  *) echo "fake $1 output" ;;
 esac
 `
 

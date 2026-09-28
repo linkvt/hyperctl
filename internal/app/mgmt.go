@@ -6,32 +6,31 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/urfave/cli/v3"
+	"time"
 
 	"github.com/linkvt/hyperctl/internal/ocp"
 	"github.com/linkvt/hyperctl/internal/xdg"
 )
 
 // ensureMgmtCluster installs the management cluster unless it is installed.
-func ensureMgmtCluster(ctx context.Context, cmd *cli.Command, dirs xdg.Dirs, opts createOptions) error {
+func ensureMgmtCluster(ctx context.Context, p progress, dirs xdg.Dirs, opts createOptions) error {
 	record, found, err := loadClusterRecord(clusterDir(dirs, opts.Name))
 	if err != nil {
 		return err
 	}
 	switch {
 	case found && record.Phase == phaseInstalled:
-		_, _ = fmt.Fprintf(cmd.Root().Writer, "Management cluster %s is already installed\n", opts.Name)
+		p.done("Management cluster %s is already installed", opts.Name)
 		return nil
 	case found:
 		return fmt.Errorf("previous installation of management cluster %s did not complete, destroy it first", opts.Name)
 	}
-	return installMgmtCluster(ctx, cmd, dirs, opts)
+	return installMgmtCluster(ctx, p, dirs, opts)
 }
 
 // installMgmtCluster extracts the installer for the release and installs the
 // management cluster, tracking progress in the cluster record.
-func installMgmtCluster(ctx context.Context, cmd *cli.Command, dirs xdg.Dirs, opts createOptions) error {
+func installMgmtCluster(ctx context.Context, p progress, dirs xdg.Dirs, opts createOptions) error {
 	release := ocp.ParseRelease(opts.Release)
 
 	pullSecret, err := os.ReadFile(opts.PullSecret)
@@ -45,7 +44,7 @@ func installMgmtCluster(ctx context.Context, cmd *cli.Command, dirs xdg.Dirs, op
 		}
 	}
 
-	installer, err := ocp.EnsureInstaller(ctx, filepath.Join(dirs.Cache, "releases"), release, opts.PullSecret)
+	installer, err := ensureInstaller(ctx, p, dirs, release, opts.PullSecret)
 	if err != nil {
 		return err
 	}
@@ -84,11 +83,37 @@ func installMgmtCluster(ctx context.Context, cmd *cli.Command, dirs xdg.Dirs, op
 	if err := saveClusterRecord(clusterDir, record); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(cmd.Root().Writer, "Installing management cluster %s, this takes about 45 minutes (log: %s)\n",
-		opts.Name, filepath.Join(installDir, ".openshift_install.log"))
-	if err := installer.CreateCluster(ctx, installDir, release, cmd.Root().Writer, cmd.Root().ErrWriter); err != nil {
+	p.info("Installing, this takes about 45 minutes (log: %s)", filepath.Join(installDir, ".openshift_install.log"))
+	start := time.Now()
+	if err := installer.CreateCluster(ctx, installDir, release, p.tool("openshift-install")); err != nil {
 		return err
 	}
 	record.Phase = phaseInstalled
-	return saveClusterRecord(clusterDir, record)
+	if err := saveClusterRecord(clusterDir, record); err != nil {
+		return err
+	}
+	p.done("Installed management cluster %s (%s)", opts.Name, since(start))
+	return nil
+}
+
+// ensureInstaller returns the openshift-install binary for the release from
+// the cache, extracting it from the release image if needed.
+func ensureInstaller(ctx context.Context, p progress, dirs xdg.Dirs, release ocp.Release, pullSecret string) (ocp.Installer, error) {
+	cacheDir := filepath.Join(dirs.Cache, "releases")
+	if installer, found := ocp.CachedInstaller(cacheDir, release); found {
+		p.done("Using cached openshift-install %s", release.Name)
+		return installer, nil
+	}
+	var installer ocp.Installer
+	start := time.Now()
+	err := p.wait(ctx, "Extracting openshift-install "+release.Name+" from "+release.PullSpec, func(ctx context.Context) error {
+		var err error
+		installer, err = ocp.ExtractInstaller(ctx, cacheDir, release, pullSecret)
+		return err
+	})
+	if err != nil {
+		return ocp.Installer{}, err
+	}
+	p.done("Extracted openshift-install %s (%s)", release.Name, since(start))
+	return installer, nil
 }

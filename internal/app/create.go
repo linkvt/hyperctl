@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/urfave/cli/v3"
 
@@ -53,11 +54,13 @@ func createCommand(deps Deps) *cli.Command {
 }
 
 func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
+	p := progress{w: cmd.Root().Writer, interactive: deps.Interactive}
+	p.step("Checking prerequisites")
 	identity, err := requireIAMUser(ctx, deps.AWS)
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(cmd.Root().Writer, "AWS identity: %s\n", identity)
+	p.done("AWS identity %s", identity)
 
 	dirs, err := xdg.Resolve("hyperctl")
 	if err != nil {
@@ -75,10 +78,13 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if err != nil {
 		return err
 	}
+	p.done("hypershift %s", hypershiftPath)
 	credentialsFile, err := awsCredentialsFile()
 	if err != nil {
 		return err
 	}
+	p.done("AWS credentials file %s", credentialsFile)
+
 	opts, err := resolveCreateOptions(ctx, cmd, deps, dirs, st, cfg)
 	if err != nil {
 		return err
@@ -90,7 +96,9 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if err := saveState(dirs.State, st); err != nil {
 		return err
 	}
-	oidcBucketRegion, err := ensureAWSPrerequisites(ctx, cmd.Root().Writer, deps.AWS, opts)
+
+	p.step("Checking the AWS account")
+	oidcBucketRegion, err := ensureAWSPrerequisites(ctx, p, deps.AWS, opts)
 	if err != nil {
 		return err
 	}
@@ -98,7 +106,7 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if err != nil {
 		return err
 	}
-	if err := deleteDNSLeftovers(ctx, cmd.Root().Writer, deps, cmd.Bool("yes"), opts.BaseDomain, untracked...); err != nil {
+	if err := deleteDNSLeftovers(ctx, p, deps, cmd.Bool("yes"), opts.BaseDomain, untracked...); err != nil {
 		return err
 	}
 
@@ -108,17 +116,18 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if err := saveState(dirs.State, st); err != nil {
 		return err
 	}
-	if err := ensureMgmtCluster(ctx, cmd, dirs, opts); err != nil {
+	p.step("Management cluster %s", opts.Name)
+	if err := ensureMgmtCluster(ctx, p, dirs, opts); err != nil {
 		return err
 	}
 
-	_, _ = fmt.Fprintln(cmd.Root().Writer, "Installing the HyperShift operator")
+	p.step("HyperShift operator")
 	hs := hypershift.CLI{
 		Path:       hypershiftPath,
 		Kubeconfig: mgmtKubeconfigPath(dirs, opts.Name),
-		Stdout:     cmd.Root().Writer,
-		Stderr:     cmd.Root().ErrWriter,
+		Output:     p.tool("hypershift"),
 	}
+	start := time.Now()
 	if err := hs.Install(ctx, hypershift.InstallParams{
 		OIDCBucket:         opts.OIDCBucket,
 		OIDCBucketRegion:   oidcBucketRegion,
@@ -126,14 +135,19 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	}); err != nil {
 		return err
 	}
+	p.done("Installed the HyperShift operator (%s)", since(start))
+
 	st.HostedCluster = opts.HostedName
 	if err := saveState(dirs.State, st); err != nil {
 		return err
 	}
-	if err := ensureHostedCluster(ctx, cmd.Root().Writer, hs, dirs, opts); err != nil {
+	p.step("Hosted cluster %s", opts.HostedName)
+	if err := ensureHostedCluster(ctx, p, hs, dirs, opts); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintln(cmd.Root().Writer, "Done, use the hosted cluster with:\n  export KUBECONFIG=$(hyperctl kubeconfig)")
+
+	p.step("Done, use the hosted cluster with:")
+	p.info("export KUBECONFIG=$(hyperctl kubeconfig)")
 	return nil
 }
 

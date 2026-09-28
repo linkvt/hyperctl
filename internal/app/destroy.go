@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
+	"time"
 
 	"github.com/urfave/cli/v3"
 
@@ -63,6 +63,7 @@ func runDestroy(ctx context.Context, cmd *cli.Command, deps Deps) error {
 		}
 	}
 
+	p := progress{w: cmd.Root().Writer, interactive: deps.Interactive}
 	if st.HostedCluster != "" {
 		cfg, err := loadConfig(dirs.Config)
 		if err != nil {
@@ -75,10 +76,10 @@ func runDestroy(ctx context.Context, cmd *cli.Command, deps Deps) error {
 		hs := hypershift.CLI{
 			Path:       hypershiftPath,
 			Kubeconfig: mgmtKubeconfigPath(dirs, st.MgmtCluster),
-			Stdout:     cmd.Root().Writer,
-			Stderr:     cmd.Root().ErrWriter,
+			Output:     p.tool("hypershift"),
 		}
-		if err := destroyHostedCluster(ctx, cmd, deps, hs, dirs, st.MgmtCluster, st.HostedCluster); err != nil {
+		p.step("Hosted cluster %s", st.HostedCluster)
+		if err := destroyHostedCluster(ctx, p, cmd.Bool("yes"), deps, hs, dirs, st.MgmtCluster, st.HostedCluster); err != nil {
 			return err
 		}
 		st.HostedCluster = ""
@@ -90,7 +91,8 @@ func runDestroy(ctx context.Context, cmd *cli.Command, deps Deps) error {
 		return nil
 	}
 
-	if err := destroyMgmtCluster(ctx, cmd, deps, dirs, st.MgmtCluster); err != nil {
+	p.step("Management cluster %s", st.MgmtCluster)
+	if err := destroyMgmtCluster(ctx, p, cmd.Bool("yes"), deps, dirs, st.MgmtCluster); err != nil {
 		return err
 	}
 	st.MgmtCluster = ""
@@ -109,45 +111,49 @@ func destroyTargets(st state, scope string) []string {
 	return targets
 }
 
-func destroyHostedCluster(ctx context.Context, cmd *cli.Command, deps Deps, hs hypershift.CLI, dirs xdg.Dirs, mgmt, hosted string) error {
+func destroyHostedCluster(ctx context.Context, p progress, yes bool, deps Deps, hs hypershift.CLI, dirs xdg.Dirs, mgmt, hosted string) error {
 	dir := hostedDir(dirs, mgmt, hosted)
 	record, found, err := loadClusterRecord(dir)
 	if err != nil {
 		return err
 	}
 	if !found {
-		// Creation never started, nothing to destroy.
+		p.done("Creation never started, nothing to destroy")
 		return os.RemoveAll(dir)
 	}
-	_, _ = fmt.Fprintf(cmd.Root().Writer, "Destroying hosted cluster %s\n", hosted)
+	p.info("Destroying")
+	start := time.Now()
 	if err := hs.DestroyCluster(ctx, hosted, record.Region, record.BaseDomain); err != nil {
 		return err
 	}
-	if err := deleteDNSLeftovers(ctx, cmd.Root().Writer, deps, cmd.Bool("yes"), record.BaseDomain, hosted); err != nil {
+	p.done("Destroyed hosted cluster %s (%s)", hosted, since(start))
+	if err := deleteDNSLeftovers(ctx, p, deps, yes, record.BaseDomain, hosted); err != nil {
 		return err
 	}
 	return os.RemoveAll(dir)
 }
 
-func destroyMgmtCluster(ctx context.Context, cmd *cli.Command, deps Deps, dirs xdg.Dirs, name string) error {
+func destroyMgmtCluster(ctx context.Context, p progress, yes bool, deps Deps, dirs xdg.Dirs, name string) error {
 	dir := clusterDir(dirs, name)
 	record, found, err := loadClusterRecord(dir)
 	if err != nil {
 		return err
 	}
 	if !found {
-		// Installation never started, nothing to destroy.
+		p.done("Installation never started, nothing to destroy")
 		return os.RemoveAll(dir)
 	}
-	installer, err := ocp.EnsureInstaller(ctx, filepath.Join(dirs.Cache, "releases"), ocp.ParseRelease(record.Release), record.PullSecret)
+	installer, err := ensureInstaller(ctx, p, dirs, ocp.ParseRelease(record.Release), record.PullSecret)
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(cmd.Root().Writer, "Destroying management cluster %s\n", name)
-	if err := installer.DestroyCluster(ctx, installDir(dirs, name), cmd.Root().Writer, cmd.Root().ErrWriter); err != nil {
+	p.info("Destroying")
+	start := time.Now()
+	if err := installer.DestroyCluster(ctx, installDir(dirs, name), p.tool("openshift-install")); err != nil {
 		return err
 	}
-	if err := deleteDNSLeftovers(ctx, cmd.Root().Writer, deps, cmd.Bool("yes"), record.BaseDomain, name); err != nil {
+	p.done("Destroyed management cluster %s (%s)", name, since(start))
+	if err := deleteDNSLeftovers(ctx, p, deps, yes, record.BaseDomain, name); err != nil {
 		return err
 	}
 	return os.RemoveAll(dir)

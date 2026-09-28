@@ -3,30 +3,39 @@ package app
 import (
 	"context"
 	"fmt"
-	"io"
 	"strings"
 )
 
 // deleteDNSLeftovers deletes DNS entries that clusters with the given names
 // left behind, e.g. after their instances were pruned. It asks for
 // confirmation unless yes is set.
-func deleteDNSLeftovers(ctx context.Context, w io.Writer, deps Deps, yes bool, baseDomain string, names ...string) error {
+func deleteDNSLeftovers(ctx context.Context, p progress, deps Deps, yes bool, baseDomain string, names ...string) error {
+	if len(names) == 0 {
+		return nil
+	}
 	var withLeftovers []string
 	var lines []string
-	for _, name := range names {
-		entries, err := deps.AWS.ClusterDNS(ctx, baseDomain, name)
-		if err != nil {
-			return err
+	err := p.wait(ctx, "Checking DNS leftovers of "+strings.Join(names, ", "), func(ctx context.Context) error {
+		for _, name := range names {
+			entries, err := deps.AWS.ClusterDNS(ctx, baseDomain, name)
+			if err != nil {
+				return err
+			}
+			if len(entries) == 0 {
+				continue
+			}
+			withLeftovers = append(withLeftovers, name)
+			for _, entry := range entries {
+				lines = append(lines, "    "+entry)
+			}
 		}
-		if len(entries) == 0 {
-			continue
-		}
-		withLeftovers = append(withLeftovers, name)
-		for _, entry := range entries {
-			lines = append(lines, "  "+entry)
-		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	if len(withLeftovers) == 0 {
+		p.done("No DNS leftovers of %s", strings.Join(names, ", "))
 		return nil
 	}
 
@@ -39,11 +48,17 @@ func deleteDNSLeftovers(ctx context.Context, w io.Writer, deps Deps, yes bool, b
 			return err
 		}
 	}
-	for _, name := range withLeftovers {
-		if err := deps.AWS.DeleteClusterDNS(ctx, baseDomain, name); err != nil {
-			return err
+	err = p.wait(ctx, "Deleting DNS entries of "+strings.Join(withLeftovers, ", "), func(ctx context.Context) error {
+		for _, name := range withLeftovers {
+			if err := deps.AWS.DeleteClusterDNS(ctx, baseDomain, name); err != nil {
+				return err
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
-	_, _ = fmt.Fprintf(w, "Deleted DNS entries:\n%s\n", list)
+	p.done("Deleted DNS entries:\n%s", list)
 	return nil
 }

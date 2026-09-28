@@ -15,8 +15,8 @@ import (
 type CLI struct {
 	Path       string
 	Kubeconfig string
-	Stdout     io.Writer
-	Stderr     io.Writer
+	// Output receives the output of hypershift.
+	Output io.Writer
 }
 
 // InstallParams configure the HyperShift operator installation.
@@ -85,7 +85,7 @@ func (c CLI) DestroyCluster(ctx context.Context, name, region, baseDomain string
 // HostedKubeconfig returns an admin kubeconfig for the hosted cluster.
 func (c CLI) HostedKubeconfig(ctx context.Context, name string) ([]byte, error) {
 	cmd := c.command(ctx, "create", "kubeconfig", "--name", name)
-	cmd.Stderr = c.Stderr
+	cmd.Stderr = c.Output
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("hypershift create kubeconfig: %w", err)
@@ -95,8 +95,8 @@ func (c CLI) HostedKubeconfig(ctx context.Context, name string) ([]byte, error) 
 
 func (c CLI) run(ctx context.Context, args ...string) error {
 	cmd := c.command(ctx, args...)
-	cmd.Stdout = c.Stdout
-	cmd.Stderr = c.Stderr
+	cmd.Stdout = c.Output
+	cmd.Stderr = c.Output
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("hypershift %s: %w", strings.Join(args[:2], " "), err)
 	}
