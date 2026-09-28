@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"sigs.k8s.io/yaml"
 )
@@ -39,6 +40,8 @@ type clusterRecord struct {
 	// PullSecret is the pull secret path, needed to extract the installer
 	// again for destroying a management cluster.
 	PullSecret string `json:"pullSecret,omitempty"`
+	// UpdatedAt is the time of the last change, set when saving the record.
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 func loadState(stateDir string) (state, error) {
@@ -59,6 +62,7 @@ func loadClusterRecord(clusterDir string) (clusterRecord, bool, error) {
 }
 
 func saveClusterRecord(clusterDir string, r clusterRecord) error {
+	r.UpdatedAt = time.Now()
 	return writeYAML(filepath.Join(clusterDir, "cluster.yaml"), r)
 }
 

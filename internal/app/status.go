@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 
 	"github.com/urfave/cli/v3"
 
@@ -11,17 +12,18 @@ import (
 	"github.com/linkvt/hyperctl/internal/xdg"
 )
 
-func statusCommand() *cli.Command {
+func statusCommand(deps Deps) *cli.Command {
 	return &cli.Command{
 		Name:  "status",
 		Usage: "Show the state of the management and hosted cluster",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return runStatus(ctx, cmd.Root().Writer)
+			// Progress goes to stderr, keeping stdout for the status.
+			return runStatus(ctx, cmd.Root().Writer, progress{w: cmd.Root().ErrWriter, interactive: deps.Interactive})
 		},
 	}
 }
 
-func runStatus(ctx context.Context, w io.Writer) error {
+func runStatus(ctx context.Context, w io.Writer, p progress) error {
 	dirs, err := xdg.Resolve("hyperctl")
 	if err != nil {
 		return err
@@ -39,19 +41,30 @@ func runStatus(ctx context.Context, w io.Writer) error {
 	if err != nil {
 		return err
 	}
+	_, _ = fmt.Fprintf(w, "Management cluster %s\n", st.MgmtCluster)
 	if !found {
-		_, err := fmt.Fprintf(w, "Management cluster %s: not created\n", st.MgmtCluster)
-		return err
+		field(w, "Phase", "not created")
+		return nil
 	}
 	kubeconfig := mgmtKubeconfigPath(dirs, st.MgmtCluster)
-	ready := mgmt.Phase == phaseInstalled && oc.Ready(ctx, kubeconfig)
-	api := "API reachable"
-	if !ready {
-		api = "API unreachable"
+	var ready bool
+	if mgmt.Phase == phaseInstalled {
+		_ = p.wait(ctx, "Checking the management cluster API", func(ctx context.Context) error {
+			ready = oc.Ready(ctx, kubeconfig)
+			return nil
+		})
 	}
-	_, _ = fmt.Fprintf(w, "Management cluster %s: %s, release %s, region %s, %s\n", st.MgmtCluster, mgmt.Phase, mgmt.Release, mgmt.Region, api)
-	if mgmt.Phase == phaseInstalled && !ready {
-		_, _ = fmt.Fprintln(w, "  The instances may have been pruned, recreate the clusters with: hyperctl destroy && hyperctl create")
+	printPhase(w, mgmt)
+	field(w, "Release", mgmt.Release)
+	field(w, "Region", mgmt.Region)
+	switch {
+	case mgmt.Phase != phaseInstalled:
+		field(w, "Log", filepath.Join(installDir(dirs, st.MgmtCluster), ".openshift_install.log"))
+	case ready:
+		field(w, "API", "reachable")
+		field(w, "Kubeconfig", kubeconfig)
+	default:
+		field(w, "API", "unreachable, the instances may have been pruned, recreate the clusters with: hyperctl destroy && hyperctl create")
 	}
 
 	if st.HostedCluster == "" {
@@ -61,17 +74,41 @@ func runStatus(ctx context.Context, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	switch {
-	case !found:
-		_, _ = fmt.Fprintf(w, "Hosted cluster %s: not created\n", st.HostedCluster)
-	case !ready:
-		_, _ = fmt.Fprintf(w, "Hosted cluster %s: %s, Available=unknown\n", st.HostedCluster, hosted.Phase)
-	default:
-		available, err := oc.HostedClusterAvailable(ctx, kubeconfig, st.HostedCluster)
-		if err != nil {
-			available = "unknown (" + err.Error() + ")"
-		}
-		_, _ = fmt.Fprintf(w, "Hosted cluster %s: %s, Available=%s\n", st.HostedCluster, hosted.Phase, available)
+	_, _ = fmt.Fprintf(w, "\nHosted cluster %s\n", st.HostedCluster)
+	if !found {
+		field(w, "Phase", "not created")
+		return nil
+	}
+	available := "unknown"
+	if ready {
+		_ = p.wait(ctx, "Checking the hosted cluster", func(ctx context.Context) error {
+			status, err := oc.HostedClusterAvailable(ctx, kubeconfig, st.HostedCluster)
+			if err != nil {
+				available = "unknown (" + err.Error() + ")"
+				return nil
+			}
+			available = status
+			return nil
+		})
+	}
+	printPhase(w, hosted)
+	field(w, "Available", available)
+	if hosted.Phase == phaseInstalled {
+		field(w, "Kubeconfig", hostedKubeconfigPath(dirs, st.MgmtCluster, st.HostedCluster))
 	}
 	return nil
+}
+
+// printPhase prints the phase of a cluster with the time it was reached and,
+// for incomplete clusters, how to proceed.
+func printPhase(w io.Writer, r clusterRecord) {
+	field(w, "Phase", fmt.Sprintf("%s (since %s, %s ago)",
+		r.Phase, r.UpdatedAt.Local().Format("2006-01-02 15:04"), since(r.UpdatedAt)))
+	if r.Phase != phaseInstalled {
+		field(w, "Note", "unless hyperctl create is still running, the installation failed, destroy it with: hyperctl destroy")
+	}
+}
+
+func field(w io.Writer, name, value string) {
+	_, _ = fmt.Fprintf(w, "  %-12s%s\n", name+":", value)
 }

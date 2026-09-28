@@ -1,7 +1,8 @@
 package app_test
 
 import (
-	"strings"
+	"path/filepath"
+	"regexp"
 	"testing"
 )
 
@@ -14,19 +15,26 @@ func TestStatus(t *testing.T) {
 		"available clusters": {
 			hostedAvailable: "True",
 			want: []string{
-				"Management cluster test-mgmt: Installed, release 5.1.0-ec.0, region eu-central-1, API reachable",
-				"Hosted cluster test-mgmt-workload: Installed, Available=True",
+				`(?m)^Management cluster test-mgmt$`,
+				`(?m)^  Phase:\s+Installed \(since \d{4}-\d\d-\d\d \d\d:\d\d, 0s ago\)$`,
+				`(?m)^  Release:\s+5\.1\.0-ec\.0$`,
+				`(?m)^  Region:\s+eu-central-1$`,
+				`(?m)^  API:\s+reachable$`,
+				`(?m)^  Kubeconfig:\s+\S+/clusters/test-mgmt/install/auth/kubeconfig$`,
+				`(?m)^Hosted cluster test-mgmt-workload$`,
+				`(?m)^  Available:\s+True$`,
+				`(?m)^  Kubeconfig:\s+\S+/clusters/test-mgmt/hosted/test-mgmt-workload/kubeconfig$`,
 			},
 		},
 		"unavailable hosted cluster": {
 			hostedAvailable: "False",
-			want:            []string{"Hosted cluster test-mgmt-workload: Installed, Available=False"},
+			want:            []string{`(?m)^  Available:\s+False$`},
 		},
 		"unreachable management cluster": {
 			apiDown: true,
 			want: []string{
-				"Management cluster test-mgmt: Installed, release 5.1.0-ec.0, region eu-central-1, API unreachable",
-				"hyperctl destroy",
+				`(?m)^  API:\s+unreachable, the instances may have been pruned, recreate the clusters with: hyperctl destroy && hyperctl create$`,
+				`(?m)^  Available:\s+unknown$`,
 			},
 		},
 	}
@@ -42,11 +50,36 @@ func TestStatus(t *testing.T) {
 			out := env.run(t, "status")
 
 			for _, want := range tc.want {
-				if !strings.Contains(out, want) {
-					t.Errorf("expected output to contain %q, got:\n%s", want, out)
+				if !regexp.MustCompile(want).MatchString(out) {
+					t.Errorf("expected output to match %s, got:\n%s", want, out)
 				}
 			}
 		})
+	}
+}
+
+func TestStatusShowsIncompleteInstallation(t *testing.T) {
+	env := newTestEnv(t)
+	t.Setenv("HYPERCTL_TEST_INSTALLER_FAIL", "1")
+	if _, err := env.runErr(t, "create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	); err == nil {
+		t.Fatal("expected failing installer to fail create")
+	}
+
+	out := env.run(t, "status")
+
+	for _, want := range []string{
+		`(?m)^  Phase:\s+Installing \(since .*\)$`,
+		`(?m)^  Note:\s+unless hyperctl create is still running, the installation failed, destroy it with: hyperctl destroy$`,
+		`(?m)^  Log:\s+\S*` + regexp.QuoteMeta(filepath.Join("clusters", "test-mgmt", "install", ".openshift_install.log")) + `$`,
+	} {
+		if !regexp.MustCompile(want).MatchString(out) {
+			t.Errorf("expected output to match %s, got:\n%s", want, out)
+		}
 	}
 }
 
@@ -55,7 +88,7 @@ func TestStatusWithoutClusters(t *testing.T) {
 
 	out := env.run(t, "status")
 
-	if !strings.Contains(out, "No clusters") {
-		t.Errorf("expected no clusters, got:\n%s", out)
+	if want := "No clusters, create them with: hyperctl create\n"; out != want {
+		t.Errorf("got %q, want %q", out, want)
 	}
 }

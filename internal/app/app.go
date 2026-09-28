@@ -52,7 +52,7 @@ func New(deps Deps) *cli.Command {
 			destroyCommand(deps),
 			kubeconfigCommand(),
 			releasesCommand(deps),
-			statusCommand(),
+			statusCommand(deps),
 		},
 	}
 }
