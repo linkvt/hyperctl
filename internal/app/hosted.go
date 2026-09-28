@@ -26,12 +26,16 @@ func ensureHostedCluster(ctx context.Context, p progress, hs hypershift.CLI, dir
 		return fmt.Errorf("previous creation of hosted cluster %s did not complete, destroy it first", opts.HostedName)
 	}
 
+	// The infra ID is chosen and recorded before creating the cluster, so
+	// that its AWS resources can be destroyed without the management
+	// cluster, even if creating did not complete.
 	record = clusterRecord{
 		Platform:   platformAWS,
 		Phase:      phaseInstalling,
 		Release:    opts.Release,
 		Region:     opts.Region,
 		BaseDomain: opts.BaseDomain,
+		InfraID:    hypershift.NewInfraID(opts.HostedName),
 	}
 	if err := saveClusterRecord(dir, record); err != nil {
 		return err
@@ -40,6 +44,7 @@ func ensureHostedCluster(ctx context.Context, p progress, hs hypershift.CLI, dir
 	start := time.Now()
 	if err := hs.CreateCluster(ctx, hypershift.CreateClusterParams{
 		Name:         opts.HostedName,
+		InfraID:      record.InfraID,
 		Region:       opts.Region,
 		BaseDomain:   opts.BaseDomain,
 		PullSecret:   opts.PullSecret,

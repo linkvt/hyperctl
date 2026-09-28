@@ -37,6 +37,8 @@ type clusterRecord struct {
 	Release    string       `json:"release"`
 	Region     string       `json:"region"`
 	BaseDomain string       `json:"baseDomain"`
+	// InfraID tags the AWS resources of a hosted cluster.
+	InfraID string `json:"infraID,omitempty"`
 	// PullSecret is the pull secret path, needed to extract the installer
 	// again for destroying a management cluster.
 	PullSecret string `json:"pullSecret,omitempty"`

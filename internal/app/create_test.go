@@ -3,6 +3,7 @@ package app_test
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -390,17 +391,18 @@ func TestCreateCreatesHostedClusterWithAutoNode(t *testing.T) {
 	)
 
 	call := env.hypershiftCall(t, "create cluster ")
-	want := "create cluster aws" +
+	want := "^create cluster aws" +
 		" --name test-mgmt-workload" +
+		" --infra-id test-mgmt-workload-[a-z0-9]{5}" +
 		" --region eu-central-1" +
 		" --base-domain example.com" +
-		" --pull-secret " + env.pullSecret +
-		" --release-image quay.io/openshift-release-dev/ocp-release:5.1.0-ec.0-x86_64" +
+		" --pull-secret " + regexp.QuoteMeta(env.pullSecret) +
+		" --release-image quay\\.io/openshift-release-dev/ocp-release:5\\.1\\.0-ec\\.0-x86_64" +
 		" --node-pool-replicas 1" +
 		" --auto-node" +
 		" --wait" +
-		" --timeout 45m0s"
-	if call.args != want {
+		" --timeout 45m0s$"
+	if !regexp.MustCompile(want).MatchString(call.args) {
 		t.Errorf("hypershift args:\ngot:  %s\nwant: %s", call.args, want)
 	}
 	if want := filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/install/auth/kubeconfig"); call.kubeconfig != want {

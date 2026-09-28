@@ -10,6 +10,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/linkvt/hyperctl/internal/hypershift"
+	"github.com/linkvt/hyperctl/internal/oc"
 	"github.com/linkvt/hyperctl/internal/ocp"
 	"github.com/linkvt/hyperctl/internal/xdg"
 )
@@ -121,10 +122,31 @@ func destroyHostedCluster(ctx context.Context, p progress, yes bool, deps Deps, 
 		p.done("Creation never started, nothing to destroy")
 		return os.RemoveAll(dir)
 	}
-	p.info("Destroying")
+	params := hypershift.DestroyClusterParams{
+		Name:       hosted,
+		InfraID:    record.InfraID,
+		Region:     record.Region,
+		BaseDomain: record.BaseDomain,
+	}
+	var ready bool
+	_ = p.wait(ctx, "Checking the management cluster API", func(ctx context.Context) error {
+		ready = oc.Ready(ctx, hs.Kubeconfig)
+		return nil
+	})
 	start := time.Now()
-	if err := hs.DestroyCluster(ctx, hosted, record.Region, record.BaseDomain); err != nil {
-		return err
+	switch {
+	case ready:
+		p.info("Destroying")
+		if err := hs.DestroyCluster(ctx, params); err != nil {
+			return err
+		}
+	case record.InfraID != "":
+		p.info("Management cluster unreachable, destroying the AWS resources of infra ID %s", record.InfraID)
+		if err := hs.DestroyInfra(ctx, params); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("management cluster unreachable and the infra ID of hosted cluster %s is unknown, destroy its AWS resources manually", hosted)
 	}
 	p.done("Destroyed hosted cluster %s (%s)", hosted, since(start))
 	if err := deleteDNSLeftovers(ctx, p, deps, yes, record.BaseDomain, hosted); err != nil {

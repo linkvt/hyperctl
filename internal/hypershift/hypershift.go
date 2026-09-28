@@ -40,7 +40,9 @@ func (c CLI) Install(ctx context.Context, p InstallParams) error {
 
 // CreateClusterParams configure an AWS hosted cluster.
 type CreateClusterParams struct {
-	Name         string
+	Name string
+	// InfraID tags the AWS resources of the cluster, see NewInfraID.
+	InfraID      string
 	Region       string
 	BaseDomain   string
 	PullSecret   string
@@ -58,6 +60,7 @@ const createClusterTimeout = 45 * time.Minute
 func (c CLI) CreateCluster(ctx context.Context, p CreateClusterParams) error {
 	args := []string{"create", "cluster", "aws",
 		"--name", p.Name,
+		"--infra-id", p.InfraID,
 		"--region", p.Region,
 		"--base-domain", p.BaseDomain,
 		"--pull-secret", p.PullSecret,
@@ -73,12 +76,39 @@ func (c CLI) CreateCluster(ctx context.Context, p CreateClusterParams) error {
 	return c.run(ctx, args...)
 }
 
+// DestroyClusterParams identify an AWS hosted cluster to destroy.
+type DestroyClusterParams struct {
+	Name       string
+	InfraID    string
+	Region     string
+	BaseDomain string
+}
+
 // DestroyCluster destroys an AWS hosted cluster and its cloud resources.
-func (c CLI) DestroyCluster(ctx context.Context, name, region, baseDomain string) error {
+func (c CLI) DestroyCluster(ctx context.Context, p DestroyClusterParams) error {
 	return c.run(ctx, "destroy", "cluster", "aws",
-		"--name", name,
-		"--region", region,
-		"--base-domain", baseDomain,
+		"--name", p.Name,
+		"--infra-id", p.InfraID,
+		"--region", p.Region,
+		"--base-domain", p.BaseDomain,
+	)
+}
+
+// DestroyInfra destroys the AWS infrastructure and IAM resources of a hosted
+// cluster by its infra ID. Unlike DestroyCluster, it works without the
+// management cluster.
+func (c CLI) DestroyInfra(ctx context.Context, p DestroyClusterParams) error {
+	if err := c.run(ctx, "destroy", "infra", "aws",
+		"--infra-id", p.InfraID,
+		"--name", p.Name,
+		"--region", p.Region,
+		"--base-domain", p.BaseDomain,
+	); err != nil {
+		return err
+	}
+	return c.run(ctx, "destroy", "iam", "aws",
+		"--infra-id", p.InfraID,
+		"--region", p.Region,
 	)
 }
 
