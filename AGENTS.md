@@ -23,6 +23,11 @@ PATH and an in-memory `fakeAWS`, see `internal/app/helpers_test.go`. Extend
 the fakes rather than mocking internal packages. Prompts need a TTY and are
 verified by hand.
 
+A built hyperctl acts on the user's real clusters through the default XDG
+directories. Run it only with isolated `XDG_CONFIG_HOME`, `XDG_DATA_HOME`,
+`XDG_STATE_HOME` and `XDG_CACHE_HOME` set on the same command, e.g. through a
+wrapper script.
+
 Behaviour against real systems (AWS adapter, release controller, CLI flags of
 the wrapped binaries) is checked with throwaway tests in `tmp/_smoke/`, which
 `go test ./...` skips. Real AWS resources created there get unique names and
