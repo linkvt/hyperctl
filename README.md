@@ -5,7 +5,7 @@ AutoNode-enabled hosted cluster on AWS for Karpenter development.
 
 ## Prerequisites
 
-- Go
+- Go 1.27.1 or later
 - `oc`
 - `hypershift` built from [openshift/hypershift](https://github.com/openshift/hypershift)
   (`make build`), in `PATH` or configured via `hypershift` in the config file
@@ -14,11 +14,23 @@ AutoNode-enabled hosted cluster on AWS for Karpenter development.
   operator uses this file to write OIDC documents to S3.
 - A pull secret, by default at `~/.openshift/pull-secret-latest.json`
 
-## Usage
+## Installation
 
 ```sh
 go install github.com/linkvt/hyperctl@latest
+```
 
+Or from a local checkout:
+
+```sh
+go install .
+```
+
+Both install into `$(go env GOPATH)/bin`, which needs to be in `PATH`.
+
+## Usage
+
+```sh
 # Prompts for missing values, prefilled with defaults
 hyperctl create
 
