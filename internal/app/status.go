@@ -80,6 +80,7 @@ func runStatus(ctx context.Context, w io.Writer, p progress) error {
 		return nil
 	}
 	available := "unknown"
+	var annotations map[string]string
 	if ready {
 		_ = p.wait(ctx, "Checking the hosted cluster", func(ctx context.Context) error {
 			status, err := oc.HostedClusterAvailable(ctx, kubeconfig, st.HostedCluster)
@@ -88,6 +89,8 @@ func runStatus(ctx context.Context, w io.Writer, p progress) error {
 				return nil
 			}
 			available = status
+			// Overrides are optional information, errors show in availability.
+			annotations, _ = oc.HostedClusterAnnotations(ctx, kubeconfig, st.HostedCluster)
 			return nil
 		})
 	}
@@ -96,7 +99,24 @@ func runStatus(ctx context.Context, w io.Writer, p progress) error {
 	if hosted.Phase == phaseInstalled {
 		field(w, "Kubeconfig", hostedKubeconfigPath(dirs, st.MgmtCluster, st.HostedCluster))
 	}
+	printImageOverrides(w, annotations)
 	return nil
+}
+
+// printImageOverrides prints the image overrides set with hyperctl image.
+func printImageOverrides(w io.Writer, annotations map[string]string) {
+	header := false
+	for _, component := range imageComponents {
+		image, set := annotations[component.annotation]
+		if !set {
+			continue
+		}
+		if !header {
+			_, _ = fmt.Fprintln(w, "  Image overrides:")
+			header = true
+		}
+		_, _ = fmt.Fprintf(w, "    %-20s%s\n", component.title+":", image)
+	}
 }
 
 // printPhase prints the phase of a cluster with the time it was reached and,

@@ -52,6 +52,7 @@ func New(deps Deps) *cli.Command {
 			cacheCommand(),
 			createCommand(deps),
 			destroyCommand(deps),
+			imageCommand(),
 			kubeconfigCommand(),
 			releasesCommand(deps),
 			statusCommand(deps),

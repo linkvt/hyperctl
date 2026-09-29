@@ -34,6 +34,11 @@ func (p progress) done(format string, args ...any) {
 	_, _ = fmt.Fprintf(p.w, "  ✓ "+format+"\n", args...)
 }
 
+// warn reports something the user should act on.
+func (p progress) warn(format string, args ...any) {
+	_, _ = fmt.Fprintf(p.w, "  ! "+format+"\n", args...)
+}
+
 // wait runs a quiet action, showing a spinner with the title in a terminal.
 // The action must not write to the output.
 func (p progress) wait(ctx context.Context, title string, action func(context.Context) error) error {

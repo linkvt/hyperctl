@@ -20,14 +20,36 @@ const (
 // fakeOC records its arguments and "extracts" the fake openshift-install
 // into the --to directory. For status checks, the API is down when
 // HYPERCTL_TEST_API_DOWN is set and the hosted cluster's Available condition
-// is HYPERCTL_TEST_HOSTED_AVAILABLE.
+// is HYPERCTL_TEST_HOSTED_AVAILABLE. HostedCluster annotations are kept as
+// files in $HYPERCTL_TEST_LOG/annotations.
 const fakeOC = `#!/bin/sh
 d="$HYPERCTL_TEST_LOG/oc-$(ls "$HYPERCTL_TEST_LOG" | grep -c '^oc-')"
 mkdir -p "$d"
 echo "$*" > "$d/args"
+annotations="$HYPERCTL_TEST_LOG/annotations"
+mkdir -p "$annotations"
 case "$*" in
   *"get --raw /readyz"*) [ -z "$HYPERCTL_TEST_API_DOWN" ] || exit 1; echo ok; exit 0 ;;
+  *"get hostedcluster"*"-o json")
+    printf '{"metadata":{"annotations":{'
+    sep=""
+    for f in "$annotations"/*; do
+      [ -e "$f" ] || continue
+      printf '%s"%s":"%s"' "$sep" "$(basename "$f" | tr '_' '/')" "$(cat "$f")"
+      sep=","
+    done
+    printf '}}}'
+    exit 0 ;;
   *"get hostedcluster"*) printf '%s' "$HYPERCTL_TEST_HOSTED_AVAILABLE"; exit 0 ;;
+  *"annotate hostedcluster"*)
+    for a in "$@"; do
+      case "$a" in
+        *=*) key="${a%%=*}"; printf '%s' "${a#*=}" > "$annotations/$(echo "$key" | tr '/' '_')" ;;
+        *-) rm -f "$annotations/$(echo "${a%-}" | tr '/' '_')" ;;
+      esac
+    done
+    exit 0 ;;
+  *"delete pod"*) exit 0 ;;
 esac
 for a in "$@"; do
   case "$a" in --to=*) to="${a#--to=}" ;; esac
@@ -244,4 +266,21 @@ func (f *fakeAWS) DeleteClusterDNS(_ context.Context, _, name string) error {
 
 func (f *fakeAWS) FirstZone(_ context.Context, region string) (string, error) {
 	return region + "b", nil
+}
+
+// ocCalls returns the arguments of recorded oc invocations that contain
+// the given text.
+func (e *testEnv) ocCalls(t *testing.T, contains string) []string {
+	t.Helper()
+	dirs, err := filepath.Glob(filepath.Join(e.logDir, "oc-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls []string
+	for _, dir := range dirs {
+		if args := readFile(t, filepath.Join(dir, "args")); strings.Contains(args, contains) {
+			calls = append(calls, args)
+		}
+	}
+	return calls
 }

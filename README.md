@@ -50,12 +50,19 @@ already exists:
 | `hyperctl status` | Show the clusters, whether the management cluster responds and the hosted cluster is available |
 | `hyperctl kubeconfig [hosted\|mgmt]` | Print the kubeconfig path, hosted by default |
 | `hyperctl destroy [all\|hosted]` | Destroy the hosted and, by default, the management cluster |
+| `hyperctl image karpenter-operator\|karpenter <image>` | Override the Karpenter operator or Karpenter image of the hosted cluster (`--reset` to remove) |
 | `hyperctl releases [stream]` | List release streams or the accepted releases of a stream (`--all` for all) |
 | `hyperctl cache clean` | Remove cached installer binaries |
 
 Releases are given as a version of an official release (`5.1.0-ec.0`) or as a
 release image pull spec, e.g. of a nightly. Interactively, `create` lets you
 browse the [release controller](https://amd64.ocp.releases.ci.openshift.org/).
+
+`image` sets the `hypershift.openshift.io/karpenter-operator-image` or
+`hypershift.openshift.io/karpenter-provider-aws-image` annotation of the
+hosted cluster, which rolls out the deployment. Setting an unchanged image
+restarts the pods instead; hypershift only pulls `:latest` images again, other
+tags may be served from the node's image cache.
 
 Instances of stopped clusters get pruned, which leaves broken clusters and
 Route53 records behind. `status` detects an unreachable management cluster,
