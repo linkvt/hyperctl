@@ -37,11 +37,17 @@ hyperctl create
 # Non-interactive
 hyperctl create --release 5.1.0-ec.0 --name "$USER-karpenter" --region eu-central-1
 
-# Hosted cluster
+# Both clusters, the hosted cluster is the current context
 export KUBECONFIG=$(hyperctl kubeconfig)
-# Management cluster
+oc get nodes
+oc --context "$USER-karpenter" get hostedclusters -n clusters
+
+# Only one of them
 export KUBECONFIG=$(hyperctl kubeconfig mgmt)
 ```
+
+`kubeconfig` names the context, cluster and user of each kubeconfig after the
+cluster (the user gets an `-admin` suffix), so that both can be combined.
 
 `create` walks from any state to a management cluster with the HyperShift
 operator and a hosted cluster with AutoNode enabled. Re-running it skips what
@@ -60,7 +66,7 @@ already exists:
 |---|---|
 | `hyperctl create` | Create the management and hosted cluster, resuming where a previous run stopped |
 | `hyperctl status` | Show the clusters, whether the management cluster responds and the hosted cluster is available |
-| `hyperctl kubeconfig [hosted\|mgmt]` | Print the kubeconfig path, hosted by default |
+| `hyperctl kubeconfig [hosted\|mgmt]` | Print the kubeconfig paths of both clusters for `KUBECONFIG`, or of one |
 | `hyperctl destroy [all\|hosted]` | Destroy the hosted and, by default, the management cluster |
 | `hyperctl image karpenter-operator\|karpenter <image>` | Override the Karpenter operator or Karpenter image of the hosted cluster (`--reset` to remove) |
 | `hyperctl releases [stream]` | List release streams or the accepted releases of a stream (`--all` for all) |

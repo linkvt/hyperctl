@@ -72,7 +72,24 @@ printf '%s' "$OPENSHIFT_INSTALL_EXPERIMENTAL_DISABLE_IMAGE_POLICY" > "$d/disable
 dir="$4"
 mv "$dir/install-config.yaml" "$d/install-config.yaml"
 mkdir -p "$dir/auth"
-echo "fake kubeconfig" > "$dir/auth/kubeconfig"
+cat > "$dir/auth/kubeconfig" <<KUBECONFIG
+apiVersion: v1
+kind: Config
+clusters:
+- name: fake-mgmt
+  cluster:
+    server: https://api.mgmt.fake:6443
+contexts:
+- name: admin
+  context:
+    cluster: fake-mgmt
+    user: admin
+current-context: admin
+users:
+- name: admin
+  user:
+    token: mgmt-token
+KUBECONFIG
 echo '{}' > "$dir/metadata.json"
 [ -z "$HYPERCTL_TEST_INSTALLER_FAIL" ] || exit 1
 `
@@ -87,7 +104,26 @@ echo "$*" > "$d/args"
 printf '%s' "$KUBECONFIG" > "$d/kubeconfig"
 [ -n "$HYPERCTL_TEST_HYPERSHIFT_FAIL" ] && [ "$1" = "$HYPERCTL_TEST_HYPERSHIFT_FAIL" ] && exit 1
 case "$1 $2" in
-  "create kubeconfig") echo "fake hosted kubeconfig" ;;
+  "create kubeconfig") cat <<KUBECONFIG
+apiVersion: v1
+kind: Config
+clusters:
+- name: cluster
+  cluster:
+    server: https://api.hosted.fake:6443
+contexts:
+- name: admin
+  context:
+    cluster: cluster
+    namespace: default
+    user: admin
+current-context: admin
+users:
+- name: admin
+  user:
+    token: hosted-token
+KUBECONFIG
+  ;;
   *) echo "fake $1 output" ;;
 esac
 `
