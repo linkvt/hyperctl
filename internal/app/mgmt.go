@@ -13,7 +13,7 @@ import (
 )
 
 // ensureMgmtCluster installs the management cluster unless it is installed.
-func ensureMgmtCluster(ctx context.Context, p progress, dirs xdg.Dirs, opts createOptions) error {
+func ensureMgmtCluster(ctx context.Context, p progress, account AWSAccount, dirs xdg.Dirs, opts createOptions) error {
 	record, found, err := loadClusterRecord(clusterDir(dirs, opts.Name))
 	if err != nil {
 		return err
@@ -25,12 +25,12 @@ func ensureMgmtCluster(ctx context.Context, p progress, dirs xdg.Dirs, opts crea
 	case found:
 		return fmt.Errorf("previous installation of management cluster %s did not complete, destroy it first", opts.Name)
 	}
-	return installMgmtCluster(ctx, p, dirs, opts)
+	return installMgmtCluster(ctx, p, account, dirs, opts)
 }
 
 // installMgmtCluster extracts the installer for the release and installs the
 // management cluster, tracking progress in the cluster record.
-func installMgmtCluster(ctx context.Context, p progress, dirs xdg.Dirs, opts createOptions) error {
+func installMgmtCluster(ctx context.Context, p progress, account AWSAccount, dirs xdg.Dirs, opts createOptions) error {
 	release := ocp.ParseRelease(opts.Release)
 
 	pullSecret, err := os.ReadFile(opts.PullSecret)
@@ -49,12 +49,28 @@ func installMgmtCluster(ctx context.Context, p progress, dirs xdg.Dirs, opts cre
 		return err
 	}
 
+	var zone string
+	if opts.Workers == 0 {
+		err := p.wait(ctx, "Choosing an availability zone", func(ctx context.Context) error {
+			var err error
+			zone, err = account.FirstZone(ctx, opts.Region)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		p.done("Compact cluster in availability zone %s", zone)
+	}
+
 	installConfig, err := ocp.RenderInstallConfig(ocp.InstallConfigParams{
-		Name:       opts.Name,
-		BaseDomain: opts.BaseDomain,
-		Region:     opts.Region,
-		PullSecret: strings.TrimSpace(string(pullSecret)),
-		SSHKey:     strings.TrimSpace(string(sshKey)),
+		Name:         opts.Name,
+		BaseDomain:   opts.BaseDomain,
+		Region:       opts.Region,
+		Zone:         zone,
+		InstanceType: opts.InstanceType,
+		Workers:      opts.Workers,
+		PullSecret:   strings.TrimSpace(string(pullSecret)),
+		SSHKey:       strings.TrimSpace(string(sshKey)),
 	})
 	if err != nil {
 		return err

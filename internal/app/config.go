@@ -13,6 +13,9 @@ type config struct {
 	// configured yet, an empty string means no SSH key.
 	SSHKey     *string `json:"sshKey,omitempty"`
 	OIDCBucket string  `json:"oidcBucket,omitempty"`
+	// MgmtInstanceType and MgmtWorkers size the management cluster.
+	MgmtInstanceType string `json:"mgmtInstanceType,omitempty"`
+	MgmtWorkers      *int   `json:"mgmtWorkers,omitempty"`
 	// Hypershift is the path of the hypershift binary.
 	Hypershift string `json:"hypershift,omitempty"`
 }

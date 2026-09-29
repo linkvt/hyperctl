@@ -241,3 +241,7 @@ func (f *fakeAWS) DeleteClusterDNS(_ context.Context, _, name string) error {
 	delete(f.dns, name)
 	return nil
 }
+
+func (f *fakeAWS) FirstZone(_ context.Context, region string) (string, error) {
+	return region + "b", nil
+}

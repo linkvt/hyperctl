@@ -29,6 +29,9 @@ type createOptions struct {
 	SSHKey     string
 	OIDCBucket string
 	HostedName string
+	// InstanceType and Workers size the management cluster, see mgmtSize.
+	InstanceType string
+	Workers      int
 }
 
 func createCommand(deps Deps) *cli.Command {
@@ -44,6 +47,8 @@ func createCommand(deps Deps) *cli.Command {
 			&cli.StringFlag{Name: "ssh-key", Usage: "Path to an SSH public key for node access (optional)"},
 			&cli.BoolFlag{Name: "yes", Usage: "Do not ask for confirmation, also not for deleting DNS leftovers of previous clusters"},
 			&cli.StringFlag{Name: "hosted-name", Usage: "Hosted cluster name (default: <name>-workload)"},
+			&cli.StringFlag{Name: "instance-type", Usage: "EC2 instance type of the management cluster nodes (default: " + defaultInstanceType + ")"},
+			&cli.IntFlag{Name: "workers", Usage: "Worker nodes of the management cluster, 0 runs a compact cluster in a single zone (default: 0)"},
 			&cli.StringFlag{Name: "hypershift", Usage: "Path to the hypershift binary (default: from PATH)"},
 			&cli.StringFlag{Name: "oidc-bucket", Usage: "S3 bucket for OIDC discovery documents, created if missing (default: $USER-hypershift-oidc)"},
 		},
@@ -122,7 +127,7 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 		return err
 	}
 	p.step("Management cluster %s", opts.Name)
-	if err := ensureMgmtCluster(ctx, p, dirs, opts); err != nil {
+	if err := ensureMgmtCluster(ctx, p, deps.AWS, dirs, opts); err != nil {
 		return err
 	}
 
@@ -215,14 +220,19 @@ func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, dep
 		return createOptions{}, err
 	}
 	opts := createOptions{
-		Release:    flagOr(cmd, "release", defaults.Release),
-		Region:     flagOr(cmd, "region", defaults.Region),
-		BaseDomain: flagOr(cmd, "base-domain", defaults.BaseDomain),
-		Name:       flagOr(cmd, "name", defaults.Name),
-		PullSecret: flagOr(cmd, "pull-secret", defaults.PullSecret),
-		SSHKey:     flagOr(cmd, "ssh-key", defaults.SSHKey),
-		OIDCBucket: flagOr(cmd, "oidc-bucket", defaults.OIDCBucket),
-		HostedName: flagOr(cmd, "hosted-name", defaults.HostedName),
+		Release:      flagOr(cmd, "release", defaults.Release),
+		Region:       flagOr(cmd, "region", defaults.Region),
+		BaseDomain:   flagOr(cmd, "base-domain", defaults.BaseDomain),
+		Name:         flagOr(cmd, "name", defaults.Name),
+		PullSecret:   flagOr(cmd, "pull-secret", defaults.PullSecret),
+		SSHKey:       flagOr(cmd, "ssh-key", defaults.SSHKey),
+		OIDCBucket:   flagOr(cmd, "oidc-bucket", defaults.OIDCBucket),
+		HostedName:   flagOr(cmd, "hosted-name", defaults.HostedName),
+		InstanceType: flagOr(cmd, "instance-type", defaults.InstanceType),
+		Workers:      defaults.Workers,
+	}
+	if cmd.IsSet("workers") {
+		opts.Workers = cmd.Int("workers")
 	}
 	if deps.Interactive {
 		askSSHKey := !cmd.IsSet("ssh-key") && cfg.SSHKey == nil
@@ -255,6 +265,7 @@ func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, dep
 		{"--name", opts.Name},
 		{"--pull-secret", opts.PullSecret},
 		{"--oidc-bucket", opts.OIDCBucket},
+		{"--instance-type", opts.InstanceType},
 	} {
 		if required.value == "" {
 			missing = append(missing, required.flag)
@@ -274,11 +285,15 @@ func defaultCreateOptions(deps Deps, dirs xdg.Dirs, st state, cfg config) (creat
 		return createOptions{}, err
 	}
 	opts := createOptions{
-		Release:    st.LastRelease,
-		Region:     cmp.Or(cfg.Region, deps.DefaultRegion),
-		BaseDomain: cmp.Or(cfg.BaseDomain, defaultBaseDomain),
-		PullSecret: cmp.Or(cfg.PullSecret, filepath.Join(home, ".openshift", "pull-secret-latest.json")),
-		OIDCBucket: cfg.OIDCBucket,
+		Release:      st.LastRelease,
+		Region:       cmp.Or(cfg.Region, deps.DefaultRegion),
+		BaseDomain:   cmp.Or(cfg.BaseDomain, defaultBaseDomain),
+		PullSecret:   cmp.Or(cfg.PullSecret, filepath.Join(home, ".openshift", "pull-secret-latest.json")),
+		OIDCBucket:   cfg.OIDCBucket,
+		InstanceType: cmp.Or(cfg.MgmtInstanceType, defaultInstanceType),
+	}
+	if cfg.MgmtWorkers != nil {
+		opts.Workers = *cfg.MgmtWorkers
 	}
 	if user := os.Getenv("USER"); user != "" {
 		opts.Name = user + "-karpenter"

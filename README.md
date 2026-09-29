@@ -37,7 +37,8 @@ already exists:
 
 1. Check the AWS account: IAM user credentials, EC2 Spot service-linked role,
    OIDC bucket (created and made public-readable if missing), DNS leftovers
-2. Install the management cluster with `openshift-install` (about 45 minutes)
+2. Install the management cluster with `openshift-install` (about 45 minutes),
+   by default as a compact cluster of 3 `t3a.xlarge` nodes in one zone
 3. Install the HyperShift operator
 4. Create the hosted cluster with AutoNode and write its kubeconfig
 
@@ -81,6 +82,9 @@ baseDomain: autoscaling-dev.devcluster.openshift.com
 pullSecret: ~/.openshift/pull-secret-latest.json
 sshKey: ~/.ssh/id_ed25519.pub
 oidcBucket: myuser-hypershift-oidc
+# Management cluster size, mgmtWorkers: 0 runs a compact cluster in one zone
+mgmtInstanceType: t3a.xlarge
+mgmtWorkers: 0
 hypershift: ~/repos/openshift/hypershift/bin/hypershift
 ```
 

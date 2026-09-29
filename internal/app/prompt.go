@@ -68,10 +68,51 @@ func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, clie
 			return err
 		}
 	}
+	if !cmd.IsSet("instance-type") && !cmd.IsSet("workers") {
+		if err := promptSize(ctx, opts); err != nil {
+			return err
+		}
+	}
 	if !confirm {
 		return nil
 	}
 	return confirmCreateOptions(ctx, *opts)
+}
+
+// customSize marks the custom instance type option of the size prompt.
+const customSize = -1
+
+// promptSize lets the user pick a management cluster size preset or a custom
+// instance type for a compact cluster.
+func promptSize(ctx context.Context, opts *createOptions) error {
+	selected := customSize
+	var options []huh.Option[int]
+	for i, preset := range sizePresets {
+		options = append(options, huh.NewOption(preset.label, i))
+		if preset.instanceType == opts.InstanceType && preset.workers == opts.Workers {
+			selected = i
+		}
+	}
+	options = append(options, huh.NewOption("Compact with a custom instance type in 1 zone", customSize))
+	if err := huh.NewForm(huh.NewGroup(
+		huh.NewSelect[int]().Title("Management cluster size").Options(options...).Value(&selected),
+	)).RunWithContext(ctx); err != nil {
+		return err
+	}
+
+	if selected != customSize {
+		opts.InstanceType = sizePresets[selected].instanceType
+		opts.Workers = sizePresets[selected].workers
+		return nil
+	}
+	opts.Workers = 0
+	return huh.NewForm(huh.NewGroup(
+		huh.NewInput().
+			Title("EC2 instance type").
+			Description("At least 4 vCPU and 16 GiB memory").
+			Value(&opts.InstanceType).
+			Validate(requireValue),
+	)).RunWithContext(ctx)
 }
 
 const (
@@ -176,8 +217,8 @@ func confirmCreateOptions(ctx context.Context, opts createOptions) error {
 	if hostedName == "" {
 		hostedName = opts.Name + "-workload"
 	}
-	summary := fmt.Sprintf("Release:        %s\nRegion:         %s\nBase domain:    %s\nMgmt cluster:   %s\nHosted cluster: %s\nPull secret:    %s\nSSH key:        %s\nOIDC bucket:    %s",
-		opts.Release, opts.Region, opts.BaseDomain, opts.Name, hostedName, opts.PullSecret, sshKey, opts.OIDCBucket)
+	summary := fmt.Sprintf("Release:        %s\nRegion:         %s\nBase domain:    %s\nMgmt cluster:   %s\nMgmt size:      %s\nHosted cluster: %s\nPull secret:    %s\nSSH key:        %s\nOIDC bucket:    %s",
+		opts.Release, opts.Region, opts.BaseDomain, opts.Name, describeSize(opts), hostedName, opts.PullSecret, sshKey, opts.OIDCBucket)
 	confirmed := true
 	err := huh.NewForm(huh.NewGroup(
 		huh.NewNote().Title("Summary").Description(summary),
