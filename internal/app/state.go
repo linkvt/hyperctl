@@ -12,9 +12,10 @@ import (
 
 // state is what hyperctl remembers between runs.
 type state struct {
-	MgmtCluster   string `json:"mgmtCluster,omitempty"`
-	HostedCluster string `json:"hostedCluster,omitempty"`
-	LastRelease   string `json:"lastRelease,omitempty"`
+	MgmtCluster    string `json:"mgmtCluster,omitempty"`
+	HostedCluster  string `json:"hostedCluster,omitempty"`
+	LastRelease    string `json:"lastRelease,omitempty"`
+	ManagementOnly bool   `json:"managementOnly,omitempty"`
 }
 
 // clusterPhase is the lifecycle phase of a management cluster.

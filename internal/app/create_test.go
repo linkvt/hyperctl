@@ -379,6 +379,125 @@ func TestCreateInstallsHyperShiftOperator(t *testing.T) {
 	}
 }
 
+func TestCreateManagementOnlySkipsHostedCluster(t *testing.T) {
+	env := newTestEnv(t)
+	env.aws.dns["test-mgmt-workload"] = []string{"api.test-mgmt-workload.example.com"}
+
+	output := env.run(t, "create",
+		"--management-only",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	)
+
+	var installs, hostedCreates int
+	for _, call := range env.hypershiftCalls(t) {
+		if strings.HasPrefix(call.args, "install ") {
+			installs++
+		}
+		if strings.HasPrefix(call.args, "create cluster ") {
+			hostedCreates++
+		}
+	}
+	if installs != 1 || hostedCreates != 0 {
+		t.Errorf("expected one operator install and no hosted cluster creation, got %d installs and %d hosted creates", installs, hostedCreates)
+	}
+	if got := env.aws.dns["test-mgmt-workload"]; len(got) != 1 {
+		t.Errorf("hosted cluster DNS leftovers should remain untouched, got %v", got)
+	}
+
+	var state struct {
+		MgmtCluster   string `json:"mgmtCluster"`
+		HostedCluster string `json:"hostedCluster"`
+	}
+	statePath := filepath.Join(env.home, ".local", "state", "hyperctl", "state.yaml")
+	if err := yaml.Unmarshal([]byte(readFile(t, statePath)), &state); err != nil {
+		t.Fatalf("parsing state: %v", err)
+	}
+	if state.MgmtCluster != "test-mgmt" || state.HostedCluster != "" {
+		t.Errorf("state: got management %q, hosted %q; want management test-mgmt and no hosted cluster", state.MgmtCluster, state.HostedCluster)
+	}
+	if !strings.Contains(output, "Done, use the cluster kubeconfig with:\n") || !strings.Contains(output, "export KUBECONFIG=$(hyperctl kubeconfig)") {
+		t.Errorf("management-only completion should use the common kubeconfig command, got:\n%s", output)
+	}
+
+	paths := strings.Split(strings.TrimSpace(env.run(t, "kubeconfig")), string(os.PathListSeparator))
+	if len(paths) != 1 || paths[0] != filepath.Join(env.home, ".local", "share", "hyperctl", "clusters", "test-mgmt", "install", "auth", "kubeconfig") {
+		t.Errorf("management-only kubeconfig paths: got %v", paths)
+	}
+}
+
+func TestCreateRemembersManagementOnlyMode(t *testing.T) {
+	env := newTestEnv(t)
+	args := []string{
+		"create",
+		"--management-only",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	}
+	env.run(t, args...)
+	args = []string{
+		"create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	}
+	env.run(t, args...)
+
+	for _, call := range env.hypershiftCalls(t) {
+		if strings.HasPrefix(call.args, "create cluster ") {
+			t.Errorf("remembered management-only mode created a hosted cluster: %s", call.args)
+		}
+	}
+
+	var state struct {
+		ManagementOnly bool `json:"managementOnly"`
+	}
+	statePath := filepath.Join(env.home, ".local", "state", "hyperctl", "state.yaml")
+	if err := yaml.Unmarshal([]byte(readFile(t, statePath)), &state); err != nil {
+		t.Fatalf("parsing state: %v", err)
+	}
+	if !state.ManagementOnly {
+		t.Error("state did not remember management-only mode")
+	}
+}
+
+func TestCreateCanOverrideRememberedManagementOnlyMode(t *testing.T) {
+	env := newTestEnv(t)
+	args := []string{
+		"create",
+		"--management-only",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	}
+	env.run(t, args...)
+	args = []string{
+		"create",
+		"--management-only=false",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	}
+	env.run(t, args...)
+
+	var hostedCreates int
+	for _, call := range env.hypershiftCalls(t) {
+		if strings.HasPrefix(call.args, "create cluster ") {
+			hostedCreates++
+		}
+	}
+	if hostedCreates != 1 {
+		t.Errorf("expected explicit management-only=false to create one hosted cluster, got %d", hostedCreates)
+	}
+}
+
 func TestCreateCreatesHostedClusterWithAutoNode(t *testing.T) {
 	env := newTestEnv(t)
 

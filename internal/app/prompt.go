@@ -19,6 +19,19 @@ import (
 // with the current value, and for the SSH key if askSSHKey is set. With
 // confirm set, it asks for confirmation of the summary.
 func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, client releases.Client, opts *createOptions, askSSHKey, confirm bool) error {
+	if !cmd.IsSet("management-only") {
+		if err := huh.NewForm(huh.NewGroup(
+			huh.NewSelect[bool]().
+				Title("Setup").
+				Options(
+					huh.NewOption("Management and hosted cluster with AutoNode", false),
+					huh.NewOption("Management cluster and HyperShift operator only", true),
+				).
+				Value(&opts.ManagementOnly),
+		)).RunWithContext(ctx); err != nil {
+			return err
+		}
+	}
 	if !cmd.IsSet("release") {
 		release, err := promptRelease(ctx, p, client, opts.Release)
 		if err != nil {
@@ -43,7 +56,7 @@ func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, clie
 		}
 		fields = append(fields, huh.NewInput().Title(input.title).Value(input.value).Validate(requireValue))
 	}
-	if !cmd.IsSet("hosted-name") {
+	if !opts.ManagementOnly && !cmd.IsSet("hosted-name") {
 		fields = append(fields, huh.NewInput().
 			Title("Hosted cluster name").
 			Placeholder("<management cluster name>-workload").
@@ -213,12 +226,20 @@ func confirmCreateOptions(ctx context.Context, opts createOptions) error {
 	if sshKey == "" {
 		sshKey = "none"
 	}
-	hostedName := opts.HostedName
-	if hostedName == "" {
-		hostedName = opts.Name + "-workload"
+	setup := "Management and hosted cluster"
+	if opts.ManagementOnly {
+		setup = "Management cluster only"
 	}
-	summary := fmt.Sprintf("Release:        %s\nRegion:         %s\nBase domain:    %s\nMgmt cluster:   %s\nMgmt size:      %s\nHosted cluster: %s\nPull secret:    %s\nSSH key:        %s\nOIDC bucket:    %s",
-		opts.Release, opts.Region, opts.BaseDomain, opts.Name, describeSize(opts), hostedName, opts.PullSecret, sshKey, opts.OIDCBucket)
+	summary := fmt.Sprintf("Setup:          %s\nRelease:        %s\nRegion:         %s\nBase domain:    %s\nMgmt cluster:   %s\nMgmt size:      %s",
+		setup, opts.Release, opts.Region, opts.BaseDomain, opts.Name, describeSize(opts))
+	if !opts.ManagementOnly {
+		hostedName := opts.HostedName
+		if hostedName == "" {
+			hostedName = opts.Name + "-workload"
+		}
+		summary += fmt.Sprintf("\nHosted cluster: %s", hostedName)
+	}
+	summary += fmt.Sprintf("\nPull secret:    %s\nSSH key:        %s\nOIDC bucket:    %s", opts.PullSecret, sshKey, opts.OIDCBucket)
 	confirmed := true
 	err := huh.NewForm(huh.NewGroup(
 		huh.NewNote().Title("Summary").Description(summary),

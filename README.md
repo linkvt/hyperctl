@@ -1,7 +1,7 @@
 # hyperctl
 
-Interactive CLI to create a HyperShift management cluster and an
-AutoNode-enabled hosted cluster on AWS for Karpenter development.
+Interactive CLI to create a HyperShift management cluster on AWS for
+Karpenter development, optionally with an AutoNode-enabled hosted cluster.
 
 ## Prerequisites
 
@@ -34,8 +34,11 @@ Both install into `$(go env GOPATH)/bin`, which needs to be in `PATH`.
 # Prompts for missing values, prefilled with defaults
 hyperctl create
 
-# Non-interactive
+# Non-interactive, including the hosted cluster
 hyperctl create --release 5.1.0-ec.0 --name "$USER-karpenter" --region eu-central-1
+
+# Management cluster and HyperShift operator only
+hyperctl create --management-only --release 5.1.0-ec.0 --name "$USER-karpenter" --region eu-central-1
 
 # Both clusters, the hosted cluster is the current context
 export KUBECONFIG=$(hyperctl kubeconfig)
@@ -49,22 +52,25 @@ export KUBECONFIG=$(hyperctl kubeconfig mgmt)
 `kubeconfig` names the context, cluster and user of each kubeconfig after the
 cluster (the user gets an `-admin` suffix), so that both can be combined.
 
-`create` walks from any state to a management cluster with the HyperShift
-operator and a hosted cluster with AutoNode enabled. Re-running it skips what
-already exists:
+`create` installs a management cluster and the HyperShift operator. Interactive
+setup remembers the previous choice between management-only and hosted-cluster
+modes. Use `--management-only` or `--management-only=false` to select a mode
+non-interactively. Hosted-cluster mode creates an AutoNode-enabled cluster.
+Re-running `create` skips what already exists:
 
 1. Check the AWS account: IAM user credentials, EC2 Spot service-linked role,
    OIDC bucket (created and made public-readable if missing), DNS leftovers
 2. Install the management cluster with `openshift-install` (about 45 minutes),
    by default as a compact cluster of 3 `t3a.xlarge` nodes in one zone
 3. Install the HyperShift operator
-4. Create the hosted cluster with AutoNode and write its kubeconfig
+4. Unless management-only mode is selected, create the AutoNode hosted cluster
+   and write its kubeconfig
 
 `hyperctl create --help` lists all flags and defaults.
 
 | Command | Purpose |
 |---|---|
-| `hyperctl create` | Create the management and hosted cluster, resuming where a previous run stopped |
+| `hyperctl create` | Create the management cluster and optionally its hosted cluster, resuming where a previous run stopped |
 | `hyperctl status` | Show the clusters, whether the management cluster responds and the hosted cluster is available |
 | `hyperctl kubeconfig [hosted\|mgmt]` | Print the kubeconfig paths of both clusters for `KUBECONFIG`, or of one |
 | `hyperctl destroy [all\|hosted]` | Destroy the hosted and, by default, the management cluster |

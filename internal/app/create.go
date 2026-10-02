@@ -21,14 +21,15 @@ const defaultBaseDomain = "autoscaling-dev.devcluster.openshift.com"
 
 // createOptions are the values needed to create the clusters.
 type createOptions struct {
-	Release    string
-	Region     string
-	BaseDomain string
-	Name       string
-	PullSecret string
-	SSHKey     string
-	OIDCBucket string
-	HostedName string
+	Release        string
+	Region         string
+	BaseDomain     string
+	Name           string
+	PullSecret     string
+	SSHKey         string
+	OIDCBucket     string
+	HostedName     string
+	ManagementOnly bool
 	// InstanceType and Workers size the management cluster, see mgmtSize.
 	InstanceType string
 	Workers      int
@@ -46,6 +47,7 @@ func createCommand(deps Deps) *cli.Command {
 			&cli.StringFlag{Name: "pull-secret", Usage: "Path to the pull secret file (default: ~/.openshift/pull-secret-latest.json)"},
 			&cli.StringFlag{Name: "ssh-key", Usage: "Path to an SSH public key for node access (optional)"},
 			&cli.BoolFlag{Name: "yes", Usage: "Do not ask for confirmation, also not for deleting DNS leftovers of previous clusters"},
+			&cli.BoolFlag{Name: "management-only", Usage: "Create the management cluster and install the HyperShift operator without creating a hosted cluster"},
 			&cli.StringFlag{Name: "hosted-name", Usage: "Hosted cluster name (default: <name>-workload)"},
 			&cli.StringFlag{Name: "instance-type", Usage: "EC2 instance type of the management cluster nodes (default: " + defaultInstanceType + ")"},
 			&cli.IntFlag{Name: "workers", Usage: "Worker nodes of the management cluster, 0 runs a compact cluster in a single zone (default: 0)"},
@@ -103,6 +105,7 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 		return err
 	}
 	st.LastRelease = opts.Release
+	st.ManagementOnly = opts.ManagementOnly
 	if err := saveState(dirs.State, st); err != nil {
 		return err
 	}
@@ -147,16 +150,18 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	}
 	p.done("Installed the HyperShift operator (%s)", since(start))
 
-	st.HostedCluster = opts.HostedName
-	if err := saveState(dirs.State, st); err != nil {
-		return err
-	}
-	p.step("Hosted cluster %s", opts.HostedName)
-	if err := ensureHostedCluster(ctx, p, hs, dirs, opts); err != nil {
-		return err
+	if !opts.ManagementOnly {
+		st.HostedCluster = opts.HostedName
+		if err := saveState(dirs.State, st); err != nil {
+			return err
+		}
+		p.step("Hosted cluster %s", opts.HostedName)
+		if err := ensureHostedCluster(ctx, p, hs, dirs, opts); err != nil {
+			return err
+		}
 	}
 
-	p.step("Done, use the hosted cluster with:")
+	p.step("Done, use the cluster kubeconfig with:")
 	p.info("export KUBECONFIG=$(hyperctl kubeconfig)")
 	return nil
 }
@@ -167,7 +172,7 @@ func requireTrackedClusters(st state, opts createOptions) error {
 	if st.MgmtCluster != "" && st.MgmtCluster != opts.Name {
 		return fmt.Errorf("management cluster %s exists, destroy it first", st.MgmtCluster)
 	}
-	if st.HostedCluster != "" && st.HostedCluster != opts.HostedName {
+	if !opts.ManagementOnly && st.HostedCluster != "" && st.HostedCluster != opts.HostedName {
 		return fmt.Errorf("hosted cluster %s exists, destroy it first", st.HostedCluster)
 	}
 	return nil
@@ -177,10 +182,11 @@ func requireTrackedClusters(st state, opts createOptions) error {
 // hyperctl has no record of. DNS entries with these names are leftovers.
 func untrackedClusterNames(dirs xdg.Dirs, opts createOptions) ([]string, error) {
 	var names []string
-	for name, dir := range map[string]string{
-		opts.Name:       clusterDir(dirs, opts.Name),
-		opts.HostedName: hostedDir(dirs, opts.Name, opts.HostedName),
-	} {
+	clusters := map[string]string{opts.Name: clusterDir(dirs, opts.Name)}
+	if !opts.ManagementOnly {
+		clusters[opts.HostedName] = hostedDir(dirs, opts.Name, opts.HostedName)
+	}
+	for name, dir := range clusters {
 		_, found, err := loadClusterRecord(dir)
 		if err != nil {
 			return nil, err
@@ -220,19 +226,23 @@ func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, dep
 		return createOptions{}, err
 	}
 	opts := createOptions{
-		Release:      flagOr(cmd, "release", defaults.Release),
-		Region:       flagOr(cmd, "region", defaults.Region),
-		BaseDomain:   flagOr(cmd, "base-domain", defaults.BaseDomain),
-		Name:         flagOr(cmd, "name", defaults.Name),
-		PullSecret:   flagOr(cmd, "pull-secret", defaults.PullSecret),
-		SSHKey:       flagOr(cmd, "ssh-key", defaults.SSHKey),
-		OIDCBucket:   flagOr(cmd, "oidc-bucket", defaults.OIDCBucket),
-		HostedName:   flagOr(cmd, "hosted-name", defaults.HostedName),
-		InstanceType: flagOr(cmd, "instance-type", defaults.InstanceType),
-		Workers:      defaults.Workers,
+		Release:        flagOr(cmd, "release", defaults.Release),
+		Region:         flagOr(cmd, "region", defaults.Region),
+		BaseDomain:     flagOr(cmd, "base-domain", defaults.BaseDomain),
+		Name:           flagOr(cmd, "name", defaults.Name),
+		PullSecret:     flagOr(cmd, "pull-secret", defaults.PullSecret),
+		SSHKey:         flagOr(cmd, "ssh-key", defaults.SSHKey),
+		OIDCBucket:     flagOr(cmd, "oidc-bucket", defaults.OIDCBucket),
+		HostedName:     flagOr(cmd, "hosted-name", defaults.HostedName),
+		ManagementOnly: defaults.ManagementOnly,
+		InstanceType:   flagOr(cmd, "instance-type", defaults.InstanceType),
+		Workers:        defaults.Workers,
 	}
 	if cmd.IsSet("workers") {
 		opts.Workers = cmd.Int("workers")
+	}
+	if cmd.IsSet("management-only") {
+		opts.ManagementOnly = cmd.Bool("management-only")
 	}
 	if deps.Interactive {
 		askSSHKey := !cmd.IsSet("ssh-key") && cfg.SSHKey == nil
@@ -246,7 +256,7 @@ func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, dep
 			}
 		}
 	}
-	if opts.HostedName == "" && opts.Name != "" {
+	if !opts.ManagementOnly && opts.HostedName == "" && opts.Name != "" {
 		opts.HostedName = opts.Name + "-workload"
 	}
 	// Paths from the config file or prompts are not expanded by a shell.
@@ -285,12 +295,13 @@ func defaultCreateOptions(deps Deps, dirs xdg.Dirs, st state, cfg config) (creat
 		return createOptions{}, err
 	}
 	opts := createOptions{
-		Release:      st.LastRelease,
-		Region:       cmp.Or(cfg.Region, deps.DefaultRegion),
-		BaseDomain:   cmp.Or(cfg.BaseDomain, defaultBaseDomain),
-		PullSecret:   cmp.Or(cfg.PullSecret, filepath.Join(home, ".openshift", "pull-secret-latest.json")),
-		OIDCBucket:   cfg.OIDCBucket,
-		InstanceType: cmp.Or(cfg.MgmtInstanceType, defaultInstanceType),
+		ManagementOnly: st.ManagementOnly,
+		Release:        st.LastRelease,
+		Region:         cmp.Or(cfg.Region, deps.DefaultRegion),
+		BaseDomain:     cmp.Or(cfg.BaseDomain, defaultBaseDomain),
+		PullSecret:     cmp.Or(cfg.PullSecret, filepath.Join(home, ".openshift", "pull-secret-latest.json")),
+		OIDCBucket:     cfg.OIDCBucket,
+		InstanceType:   cmp.Or(cfg.MgmtInstanceType, defaultInstanceType),
 	}
 	if cfg.MgmtWorkers != nil {
 		opts.Workers = *cfg.MgmtWorkers
