@@ -36,7 +36,6 @@ run it only when asked.
 
 ## Checks and commits
 
-- `go test ./...`, `golangci-lint run ./...` and `golangci-lint fmt ./...`
-  pass before committing.
+- Run `make verify` before committing.
 - Conventional commits with DCO sign-off (`git commit -s`), one feature per
   commit.
