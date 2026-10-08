@@ -88,17 +88,22 @@ func (c Client) TagDetails(ctx context.Context, stream, tag string) (TagDetails,
 	return details, nil
 }
 
-func (r TagResults) HasFailures() bool {
-	return hasFailedJob(r.BlockingJobs) || hasFailedJob(r.InformingJobs) || hasFailedJob(r.AsyncJobs)
+func (r TagResults) FailedJobCount() int {
+	return countFailedJobs(r.BlockingJobs) + countFailedJobs(r.InformingJobs) + countFailedJobs(r.AsyncJobs)
 }
 
-func hasFailedJob(jobs map[string]JobResult) bool {
+func countFailedJobs(jobs map[string]JobResult) int {
+	count := 0
 	for _, job := range jobs {
 		if job.State == "Failed" {
-			return true
+			count++
 		}
 	}
-	return false
+	return count
+}
+
+func (r TagResults) HasFailures() bool {
+	return r.FailedJobCount() > 0
 }
 
 func (c Client) get(ctx context.Context, path string, v any) error {

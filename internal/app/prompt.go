@@ -206,13 +206,14 @@ func browseReleases(ctx context.Context, p progress, client releases.Client) (st
 	}
 
 	var tags []releases.Tag
+	var failureCounts map[string]int
 	err = p.wait(ctx, "Loading releases of "+stream, func(ctx context.Context) error {
 		var err error
 		tags, err = client.Tags(ctx, stream)
 		if err != nil {
 			return err
 		}
-		tags, err = filterBrowseTags(ctx, client, stream, tags, filter)
+		tags, failureCounts, err = filterBrowseTags(ctx, client, stream, tags, filter)
 		return err
 	})
 	if err != nil {
@@ -223,7 +224,7 @@ func browseReleases(ctx context.Context, p progress, client releases.Client) (st
 	}
 	var options []huh.Option[string]
 	for _, tag := range tags {
-		options = append(options, huh.NewOption(tag.Name+" ("+tag.Phase+")", tag.PullSpec))
+		options = append(options, huh.NewOption(releaseOptionLabel(tag, failureCounts[tag.Name]), tag.PullSpec))
 	}
 	var pullSpec string
 	err = huh.NewForm(huh.NewGroup(
@@ -244,31 +245,45 @@ func noReleasesError(stream string, filter releaseFilter) error {
 	}
 }
 
-func filterBrowseTags(ctx context.Context, client releases.Client, stream string, tags []releases.Tag, filter releaseFilter) ([]releases.Tag, error) {
+func releaseOptionLabel(tag releases.Tag, failedJobs int) string {
+	label := tag.Name + " (" + tag.Phase
+	if failedJobs > 0 {
+		label += fmt.Sprintf(" · %d failed", failedJobs)
+	}
+	return label + ")"
+}
+
+func filterBrowseTags(ctx context.Context, client releases.Client, stream string, tags []releases.Tag, filter releaseFilter) ([]releases.Tag, map[string]int, error) {
 	if filter == releaseFilterAll {
-		return tags, nil
+		return tags, nil, nil
 	}
 
 	var filtered []releases.Tag
+	var failureCounts map[string]int
 	for _, tag := range tags {
 		if tag.Phase != releases.PhaseAccepted {
 			continue
 		}
+		details, err := client.TagDetails(ctx, stream, tag.Name)
+		if err != nil {
+			return nil, nil, fmt.Errorf("loading results for release %s: %w", tag.Name, err)
+		}
+		if details.Results == nil {
+			return nil, nil, fmt.Errorf("release %s has no job results", tag.Name)
+		}
 		if filter == releaseFilterAcceptedNoFailures {
-			details, err := client.TagDetails(ctx, stream, tag.Name)
-			if err != nil {
-				return nil, fmt.Errorf("loading results for release %s: %w", tag.Name, err)
-			}
-			if details.Results == nil {
-				return nil, fmt.Errorf("release %s has no job results", tag.Name)
-			}
 			if details.Results.HasFailures() {
 				continue
 			}
+		} else if failedJobs := details.Results.FailedJobCount(); failedJobs > 0 {
+			if failureCounts == nil {
+				failureCounts = make(map[string]int)
+			}
+			failureCounts[tag.Name] = failedJobs
 		}
 		filtered = append(filtered, tag)
 	}
-	return filtered, nil
+	return filtered, failureCounts, nil
 }
 
 // confirmCreateOptions shows a summary and fails unless the user confirms.

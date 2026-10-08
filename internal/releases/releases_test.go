@@ -40,6 +40,24 @@ func TestClientTagDetails(t *testing.T) {
 	}
 }
 
+func TestTagResultsFailedJobCount(t *testing.T) {
+	results := TagResults{
+		BlockingJobs: map[string]JobResult{
+			"failed-one": {State: "Failed"},
+			"passed":     {State: "Succeeded"},
+		},
+		InformingJobs: map[string]JobResult{
+			"failed-two": {State: "Failed"},
+		},
+		AsyncJobs: map[string]JobResult{
+			"failed-three": {State: "Failed"},
+		},
+	}
+	if got := results.FailedJobCount(); got != 3 {
+		t.Errorf("FailedJobCount() = %d, want 3", got)
+	}
+}
+
 func TestTagResultsHasFailures(t *testing.T) {
 	tests := map[string]struct {
 		results TagResults
