@@ -134,6 +134,14 @@ const (
 	releaseManual   = "manual"
 )
 
+type releaseFilter int
+
+const (
+	releaseFilterAcceptedNoFailures releaseFilter = iota
+	releaseFilterAccepted
+	releaseFilterAll
+)
+
 // promptRelease lets the user keep the last used release, browse the release
 // controller or enter a version or pull spec.
 func promptRelease(ctx context.Context, p progress, client releases.Client, lastUsed string) (string, error) {
@@ -167,15 +175,16 @@ func promptRelease(ctx context.Context, p progress, client releases.Client, last
 	}
 }
 
-// browseReleases lets the user pick a release: accepted ones only unless
-// all phases are chosen, then a stream and one of its releases.
+// browseReleases lets the user choose which release results to browse, then
+// select a stream and one of its releases.
 func browseReleases(ctx context.Context, p progress, client releases.Client) (string, error) {
-	var all bool
+	filter := releaseFilterAcceptedNoFailures
 	if err := huh.NewForm(huh.NewGroup(
-		huh.NewSelect[bool]().Title("Releases").Options(
-			huh.NewOption("Accepted only", false),
-			huh.NewOption("All phases (also Ready and Rejected)", true),
-		).Value(&all),
+		huh.NewSelect[releaseFilter]().Title("Releases").Options(
+			huh.NewOption("Accepted, no failed jobs", releaseFilterAcceptedNoFailures),
+			huh.NewOption("Accepted (including failed jobs)", releaseFilterAccepted),
+			huh.NewOption("All phases (also Ready and Rejected)", releaseFilterAll),
+		).Value(&filter),
 	)).RunWithContext(ctx); err != nil {
 		return "", err
 	}
@@ -183,7 +192,7 @@ func browseReleases(ctx context.Context, p progress, client releases.Client) (st
 	var streams []string
 	err := p.wait(ctx, "Loading release streams", func(ctx context.Context) error {
 		var err error
-		streams, err = client.Streams(ctx, all)
+		streams, err = client.Streams(ctx, filter == releaseFilterAll)
 		return err
 	})
 	if err != nil {
@@ -200,14 +209,17 @@ func browseReleases(ctx context.Context, p progress, client releases.Client) (st
 	err = p.wait(ctx, "Loading releases of "+stream, func(ctx context.Context) error {
 		var err error
 		tags, err = client.Tags(ctx, stream)
+		if err != nil {
+			return err
+		}
+		tags, err = filterBrowseTags(ctx, client, stream, tags, filter)
 		return err
 	})
 	if err != nil {
 		return "", err
 	}
-	tags = filterTags(tags, all)
 	if len(tags) == 0 {
-		return "", fmt.Errorf("no releases in stream %s", stream)
+		return "", noReleasesError(stream, filter)
 	}
 	var options []huh.Option[string]
 	for _, tag := range tags {
@@ -218,6 +230,45 @@ func browseReleases(ctx context.Context, p progress, client releases.Client) (st
 		tui.Select(huh.NewSelect[string]().Title("Release in " + stream).Options(options...).Height(15).Value(&pullSpec)),
 	)).RunWithContext(ctx)
 	return pullSpec, err
+}
+
+func noReleasesError(stream string, filter releaseFilter) error {
+	switch filter {
+	case releaseFilterAcceptedNoFailures:
+		return fmt.Errorf("no Accepted releases without failed jobs in stream %s; try %q or %q", stream,
+			"Accepted (including failed jobs)", "All phases (also Ready and Rejected)")
+	case releaseFilterAccepted:
+		return fmt.Errorf("no Accepted releases in stream %s; try %q", stream, "All phases (also Ready and Rejected)")
+	default:
+		return fmt.Errorf("no releases in stream %s", stream)
+	}
+}
+
+func filterBrowseTags(ctx context.Context, client releases.Client, stream string, tags []releases.Tag, filter releaseFilter) ([]releases.Tag, error) {
+	if filter == releaseFilterAll {
+		return tags, nil
+	}
+
+	var filtered []releases.Tag
+	for _, tag := range tags {
+		if tag.Phase != releases.PhaseAccepted {
+			continue
+		}
+		if filter == releaseFilterAcceptedNoFailures {
+			details, err := client.TagDetails(ctx, stream, tag.Name)
+			if err != nil {
+				return nil, fmt.Errorf("loading results for release %s: %w", tag.Name, err)
+			}
+			if details.Results == nil {
+				return nil, fmt.Errorf("release %s has no job results", tag.Name)
+			}
+			if details.Results.HasFailures() {
+				continue
+			}
+		}
+		filtered = append(filtered, tag)
+	}
+	return filtered, nil
 }
 
 // confirmCreateOptions shows a summary and fails unless the user confirms.

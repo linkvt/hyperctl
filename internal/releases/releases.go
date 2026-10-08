@@ -16,7 +16,7 @@ import (
 // DefaultURL is the release controller for amd64 releases.
 const DefaultURL = "https://amd64.ocp.releases.ci.openshift.org"
 
-// PhaseAccepted is the phase of releases that passed their blocking jobs.
+// PhaseAccepted is the phase of releases that passed blocking jobs or were manually accepted.
 const PhaseAccepted = "Accepted"
 
 // Tag is a release in a release stream.
@@ -24,6 +24,25 @@ type Tag struct {
 	Name     string `json:"name"`
 	Phase    string `json:"phase"`
 	PullSpec string `json:"pullSpec"`
+}
+
+// TagDetails contains a release's phase and verification results.
+type TagDetails struct {
+	Name    string      `json:"name"`
+	Phase   string      `json:"phase"`
+	Results *TagResults `json:"results"`
+}
+
+// TagResults contains verification results grouped by job type.
+type TagResults struct {
+	BlockingJobs  map[string]JobResult `json:"blockingJobs"`
+	InformingJobs map[string]JobResult `json:"informingJobs"`
+	AsyncJobs     map[string]JobResult `json:"asyncJobs"`
+}
+
+// JobResult is the final result of one verification job.
+type JobResult struct {
+	State string `json:"state"`
 }
 
 // Client reads from the release controller at BaseURL.
@@ -57,6 +76,29 @@ func (c Client) Tags(ctx context.Context, stream string) ([]Tag, error) {
 		return nil, err
 	}
 	return out.Tags, nil
+}
+
+// TagDetails returns the phase and verification results for a release.
+func (c Client) TagDetails(ctx context.Context, stream, tag string) (TagDetails, error) {
+	var details TagDetails
+	path := "/api/v1/releasestream/" + url.PathEscape(stream) + "/release/" + url.PathEscape(tag) + "?format=short"
+	if err := c.get(ctx, path, &details); err != nil {
+		return TagDetails{}, err
+	}
+	return details, nil
+}
+
+func (r TagResults) HasFailures() bool {
+	return hasFailedJob(r.BlockingJobs) || hasFailedJob(r.InformingJobs) || hasFailedJob(r.AsyncJobs)
+}
+
+func hasFailedJob(jobs map[string]JobResult) bool {
+	for _, job := range jobs {
+		if job.State == "Failed" {
+			return true
+		}
+	}
+	return false
 }
 
 func (c Client) get(ctx context.Context, path string, v any) error {
