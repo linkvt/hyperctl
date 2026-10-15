@@ -370,12 +370,32 @@ func TestCreateInstallsHyperShiftOperator(t *testing.T) {
 		" --oidc-storage-provider-s3-credentials " + filepath.Join(env.home, ".aws", "credentials") +
 		" --oidc-storage-provider-s3-region us-east-2" +
 		" --tech-preview-no-upgrade" +
+		" --enable-standalone-karpenter-operator" +
 		" --wait-until-available"
 	if call.args != want {
 		t.Errorf("hypershift args:\ngot:  %s\nwant: %s", call.args, want)
 	}
 	if want := filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/install/auth/kubeconfig"); call.kubeconfig != want {
 		t.Errorf("hypershift KUBECONFIG: got %q, want %q", call.kubeconfig, want)
+	}
+}
+
+func TestCreateEmbeddedKarpenterOperator(t *testing.T) {
+	env := newTestEnv(t)
+	env.aws.publicBuckets["my-oidc"] = "us-east-2"
+
+	env.run(t, "create",
+		"--standalone-karpenter-operator=false",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+		"--oidc-bucket", "my-oidc",
+	)
+
+	call := env.hypershiftCall(t, "install ")
+	if strings.Contains(call.args, "--enable-standalone-karpenter-operator") {
+		t.Errorf("expected no standalone Karpenter operator, got hypershift args: %s", call.args)
 	}
 }
 

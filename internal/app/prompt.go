@@ -306,6 +306,11 @@ func confirmCreateOptions(ctx context.Context, opts createOptions) error {
 		summary += fmt.Sprintf("\nHosted cluster: %s", hostedName)
 	}
 	summary += fmt.Sprintf("\nPull secret:    %s\nSSH key:        %s\nOIDC bucket:    %s", opts.PullSecret, sshKey, opts.OIDCBucket)
+	karpenterOperator := "embedded"
+	if opts.StandaloneKarpenterOperator {
+		karpenterOperator = "standalone"
+	}
+	summary += fmt.Sprintf("\nKarpenter op:   %s", karpenterOperator)
 	confirmed := true
 	err := huh.NewForm(huh.NewGroup(
 		huh.NewNote().Title("Summary").Description(summary),

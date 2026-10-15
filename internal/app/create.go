@@ -30,6 +30,10 @@ type createOptions struct {
 	OIDCBucket     string
 	HostedName     string
 	ManagementOnly bool
+	// StandaloneKarpenterOperator installs the HyperShift operator so that
+	// hosted clusters run the standalone karpenter-operator instead of the one
+	// embedded in the HyperShift image.
+	StandaloneKarpenterOperator bool
 	// InstanceType and Workers size the management cluster, see mgmtSize.
 	InstanceType string
 	Workers      int
@@ -48,6 +52,7 @@ func createCommand(deps Deps) *cli.Command {
 			&cli.StringFlag{Name: "ssh-key", Usage: "Path to an SSH public key for node access (optional)"},
 			&cli.BoolFlag{Name: "yes", Usage: "Do not ask for confirmation, also not for deleting DNS leftovers of previous clusters"},
 			&cli.BoolFlag{Name: "management-only", Usage: "Create the management cluster and install the HyperShift operator without creating a hosted cluster"},
+			&cli.BoolFlag{Name: "standalone-karpenter-operator", Value: true, Usage: "Run the standalone karpenter-operator in hosted clusters, =false runs the one embedded in the HyperShift operator image"},
 			&cli.StringFlag{Name: "hosted-name", Usage: "Hosted cluster name (default: <name>-workload)"},
 			&cli.StringFlag{Name: "instance-type", Usage: "EC2 instance type of the management cluster nodes (default: " + defaultInstanceType + ")"},
 			&cli.IntFlag{Name: "workers", Usage: "Worker nodes of the management cluster, 0 runs a compact cluster in a single zone (default: 0)"},
@@ -145,6 +150,8 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 		OIDCBucket:         opts.OIDCBucket,
 		OIDCBucketRegion:   oidcBucketRegion,
 		AWSCredentialsFile: credentialsFile,
+
+		StandaloneKarpenterOperator: opts.StandaloneKarpenterOperator,
 	}); err != nil {
 		return err
 	}
@@ -237,6 +244,8 @@ func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, dep
 		ManagementOnly: defaults.ManagementOnly,
 		InstanceType:   flagOr(cmd, "instance-type", defaults.InstanceType),
 		Workers:        defaults.Workers,
+
+		StandaloneKarpenterOperator: cmd.Bool("standalone-karpenter-operator"),
 	}
 	if cmd.IsSet("workers") {
 		opts.Workers = cmd.Int("workers")

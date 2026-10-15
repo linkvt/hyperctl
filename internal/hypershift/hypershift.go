@@ -24,18 +24,24 @@ type InstallParams struct {
 	OIDCBucket         string
 	OIDCBucketRegion   string
 	AWSCredentialsFile string
+	// StandaloneKarpenterOperator deploys the standalone karpenter-operator
+	// instead of the one embedded in the HyperShift operator image.
+	StandaloneKarpenterOperator bool
 }
 
 // Install installs the HyperShift operator and waits until it is available.
 // Installing is idempotent, so it is safe to run on every create.
 func (c CLI) Install(ctx context.Context, p InstallParams) error {
-	return c.run(ctx, "install",
+	args := []string{"install",
 		"--oidc-storage-provider-s3-bucket-name", p.OIDCBucket,
 		"--oidc-storage-provider-s3-credentials", p.AWSCredentialsFile,
 		"--oidc-storage-provider-s3-region", p.OIDCBucketRegion,
 		"--tech-preview-no-upgrade",
-		"--wait-until-available",
-	)
+	}
+	if p.StandaloneKarpenterOperator {
+		args = append(args, "--enable-standalone-karpenter-operator")
+	}
+	return c.run(ctx, append(args, "--wait-until-available")...)
 }
 
 // CreateClusterParams configure an AWS hosted cluster.

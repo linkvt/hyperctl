@@ -62,7 +62,12 @@ Re-running `create` skips what already exists:
    OIDC bucket (created and made public-readable if missing), DNS leftovers
 2. Install the management cluster with `openshift-install` (about 45 minutes),
    by default as a compact cluster of 3 `t3a.xlarge` nodes in one zone
-3. Install the HyperShift operator
+3. Install the HyperShift operator, by default with the standalone
+   karpenter-operator (`--enable-standalone-karpenter-operator`). Use
+   `--standalone-karpenter-operator=false` for the one embedded in the
+   HyperShift operator image. The `hyperctl image karpenter-operator` override
+   only applies to the standalone one. Re-running `create` with a different
+   value switches the mode of the installed operator.
 4. Unless management-only mode is selected, create the AutoNode hosted cluster
    and write its kubeconfig
 
