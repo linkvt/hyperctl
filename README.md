@@ -56,7 +56,9 @@ cluster (the user gets an `-admin` suffix), so that both can be combined.
 setup remembers the previous choice between management-only and hosted-cluster
 modes. Use `--management-only` or `--management-only=false` to select a mode
 non-interactively. Hosted-cluster mode creates an AutoNode-enabled cluster.
-Re-running `create` skips what already exists:
+Re-running `create` skips an installed management cluster. If hosted-cluster
+creation fails, clean up only that cluster with `hyperctl destroy hosted` before
+retrying; the management cluster remains installed.
 
 1. Check the AWS account: IAM user credentials, EC2 Spot service-linked role,
    OIDC bucket (created and made public-readable if missing), DNS leftovers
@@ -76,7 +78,7 @@ install a three-node compact management cluster without a worker.
 
 | Command | Purpose |
 |---|---|
-| `hyperctl create` | Create the management cluster and optionally its hosted cluster, resuming where a previous run stopped |
+| `hyperctl create` | Create the management cluster and optionally its hosted cluster, skipping an installed management cluster |
 | `hyperctl status` | Show the clusters, whether the management cluster responds and the hosted cluster is available |
 | `hyperctl kubeconfig [hosted\|mgmt]` | Print the kubeconfig paths of both clusters for `KUBECONFIG`, or of one |
 | `hyperctl destroy [all\|hosted]` | Destroy the hosted and, by default, the management cluster |

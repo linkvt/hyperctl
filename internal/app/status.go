@@ -54,7 +54,7 @@ func runStatus(ctx context.Context, w io.Writer, p progress) error {
 			return nil
 		})
 	}
-	printPhase(w, mgmt)
+	printPhase(w, mgmt, "hyperctl destroy")
 	field(w, "Release", mgmt.Release)
 	field(w, "Region", mgmt.Region)
 	switch {
@@ -94,7 +94,7 @@ func runStatus(ctx context.Context, w io.Writer, p progress) error {
 			return nil
 		})
 	}
-	printPhase(w, hosted)
+	printPhase(w, hosted, "hyperctl destroy hosted")
 	field(w, "Available", available)
 	if hosted.Phase == phaseInstalled {
 		field(w, "Kubeconfig", hostedKubeconfigPath(dirs, st.MgmtCluster, st.HostedCluster))
@@ -121,11 +121,11 @@ func printImageOverrides(w io.Writer, annotations map[string]string) {
 
 // printPhase prints the phase of a cluster with the time it was reached and,
 // for incomplete clusters, how to proceed.
-func printPhase(w io.Writer, r clusterRecord) {
+func printPhase(w io.Writer, r clusterRecord, destroyCommand string) {
 	field(w, "Phase", fmt.Sprintf("%s (since %s, %s ago)",
 		r.Phase, r.UpdatedAt.Local().Format("2006-01-02 15:04"), since(r.UpdatedAt)))
 	if r.Phase != phaseInstalled {
-		field(w, "Note", "unless hyperctl create is still running, the installation failed, destroy it with: hyperctl destroy")
+		field(w, "Note", fmt.Sprintf("unless hyperctl create is still running, the installation failed, destroy it with: %s", destroyCommand))
 	}
 }
 

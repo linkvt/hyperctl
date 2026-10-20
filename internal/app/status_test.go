@@ -83,6 +83,25 @@ func TestStatusShowsIncompleteInstallation(t *testing.T) {
 	}
 }
 
+func TestStatusShowsHostedOnlyCleanupForIncompleteHostedInstallation(t *testing.T) {
+	env := newTestEnv(t)
+	t.Setenv("HYPERCTL_TEST_HYPERSHIFT_FAIL", "create")
+	if _, err := env.runErr(t, "create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	); err == nil {
+		t.Fatal("expected failing hosted cluster creation to fail create")
+	}
+
+	out := env.run(t, "status")
+	want := `(?m)^  Note:\s+unless hyperctl create is still running, the installation failed, destroy it with: hyperctl destroy hosted$`
+	if !regexp.MustCompile(want).MatchString(out) {
+		t.Errorf("expected output to match %s, got:\n%s", want, out)
+	}
+}
+
 func TestStatusWithoutClusters(t *testing.T) {
 	env := newTestEnv(t)
 
