@@ -50,7 +50,14 @@ export KUBECONFIG=$(hyperctl kubeconfig mgmt)
 ```
 
 `kubeconfig` names the context, cluster and user of each kubeconfig after the
-cluster (the user gets an `-admin` suffix), so that both can be combined.
+cluster (the user gets an `-admin` suffix), so that both can be combined. If the
+hosted kubeconfig is not saved locally, it fetches and caches it from the
+management cluster as soon as the admin kubeconfig secret exists, even during
+installation. Until then, the default command returns only the management
+kubeconfig; `kubeconfig hosted` reports that it is not available yet. Cached
+kubeconfigs work without contacting the management cluster.
+`kubeconfig mgmt` never queries it. Kubeconfig availability does not mean the
+hosted cluster is Ready.
 
 `create` installs a management cluster and the HyperShift operator. Interactive
 setup remembers the previous choice between management-only and hosted-cluster

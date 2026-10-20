@@ -13,15 +13,35 @@ import (
 )
 
 const (
-	testPullSecret = `{"auths":{"example.com":{"auth":"Zm9vOmJhcg=="}}}`
-	testIAMUserARN = "arn:aws:iam::123456789012:user/tester"
+	testPullSecret       = `{"auths":{"example.com":{"auth":"Zm9vOmJhcg=="}}}`
+	testIAMUserARN       = "arn:aws:iam::123456789012:user/tester"
+	testHostedKubeconfig = `apiVersion: v1
+kind: Config
+clusters:
+- name: cluster
+  cluster:
+    server: https://api.hosted.fake:6443
+contexts:
+- name: admin
+  context:
+    cluster: cluster
+    namespace: default
+    user: admin
+current-context: admin
+users:
+- name: admin
+  user:
+    token: hosted-token
+`
 )
 
 // fakeOC records its arguments and "extracts" the fake openshift-install
 // into the --to directory. For status checks, the API is down when
 // HYPERCTL_TEST_API_DOWN is set and the hosted cluster's Available condition
 // is HYPERCTL_TEST_HOSTED_AVAILABLE. HostedCluster annotations are kept as
-// files in $HYPERCTL_TEST_LOG/annotations.
+// files in $HYPERCTL_TEST_LOG/annotations. HYPERCTL_TEST_HOSTED_KUBECONFIG_SECRET
+// names the hosted kubeconfig secret, whose content is read from the file at
+// HYPERCTL_TEST_HOSTED_KUBECONFIG. HYPERCTL_TEST_KUBECONFIG_ERROR fails lookups.
 const fakeOC = `#!/bin/sh
 d="$HYPERCTL_TEST_LOG/oc-$(ls "$HYPERCTL_TEST_LOG" | grep -c '^oc-')"
 mkdir -p "$d"
@@ -31,6 +51,10 @@ mkdir -p "$annotations"
 case "$*" in
   *"get --raw /readyz"*) [ -z "$HYPERCTL_TEST_API_DOWN" ] || exit 1; echo ok; exit 0 ;;
   *"get hostedcluster"*"-o json")
+    if [ -n "$HYPERCTL_TEST_KUBECONFIG_ERROR" ]; then
+      printf '%s\n' "$HYPERCTL_TEST_KUBECONFIG_ERROR" >&2
+      exit 1
+    fi
     printf '{"metadata":{"annotations":{'
     sep=""
     for f in "$annotations"/*; do
@@ -38,7 +62,17 @@ case "$*" in
       printf '%s"%s":"%s"' "$sep" "$(basename "$f" | tr '_' '/')" "$(cat "$f")"
       sep=","
     done
-    printf '}}}'
+    printf '}}'
+    if [ -n "$HYPERCTL_TEST_HOSTED_KUBECONFIG_SECRET" ]; then
+      printf ',"status":{"kubeconfig":{"name":"%s"}}' "$HYPERCTL_TEST_HOSTED_KUBECONFIG_SECRET"
+    fi
+    printf '}'
+    exit 0 ;;
+  *"get secret "*)
+    [ -n "$HYPERCTL_TEST_HOSTED_KUBECONFIG" ] || exit 0
+    printf '{"data":{"kubeconfig":"'
+    base64 < "$HYPERCTL_TEST_HOSTED_KUBECONFIG" | tr -d '\n'
+    printf '"}}'
     exit 0 ;;
   *"get hostedcluster"*) printf '%s' "$HYPERCTL_TEST_HOSTED_AVAILABLE"; exit 0 ;;
   *"annotate hostedcluster"*)
@@ -105,24 +139,7 @@ printf '%s' "$KUBECONFIG" > "$d/kubeconfig"
 [ -n "$HYPERCTL_TEST_HYPERSHIFT_FAIL" ] && [ "$1" = "$HYPERCTL_TEST_HYPERSHIFT_FAIL" ] && exit 1
 case "$1 $2" in
   "create kubeconfig") cat <<KUBECONFIG
-apiVersion: v1
-kind: Config
-clusters:
-- name: cluster
-  cluster:
-    server: https://api.hosted.fake:6443
-contexts:
-- name: admin
-  context:
-    cluster: cluster
-    namespace: default
-    user: admin
-current-context: admin
-users:
-- name: admin
-  user:
-    token: hosted-token
-KUBECONFIG
+` + testHostedKubeconfig + `KUBECONFIG
   ;;
   *) echo "fake $1 output" ;;
 esac
