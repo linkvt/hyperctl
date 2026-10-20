@@ -1,17 +1,14 @@
 # hyperctl
 
-Interactive CLI to create a HyperShift management cluster on AWS for
-Karpenter development, optionally with an AutoNode-enabled hosted cluster.
+Interactive CLI to create a HyperShift management cluster on AWS for Karpenter development, optionally with an AutoNode-enabled hosted cluster.
 
 ## Prerequisites
 
 - Go 1.27.1 or later
 - `oc`
-- `hypershift` built from [openshift/hypershift](https://github.com/openshift/hypershift)
-  (`make build`), in `PATH` or configured via `hypershift` in the config file
-- AWS credentials of an IAM user in the `[default]` profile of
-  `~/.aws/credentials` (not temporary SAML credentials). The HyperShift
-  operator uses this file to write OIDC documents to S3.
+- `hypershift` built from [openshift/hypershift](https://github.com/openshift/hypershift) (`make build`), in `PATH` or configured via `hypershift` in the config file
+- AWS credentials of an IAM user in the `[default]` profile of `~/.aws/credentials` (not temporary SAML credentials).
+  The HyperShift operator uses this file to write OIDC documents to S3.
 - A pull secret, by default at `~/.openshift/pull-secret-latest.json`
 
 ## Installation
@@ -49,39 +46,30 @@ oc --context "$USER-karpenter" get hostedclusters -n clusters
 export KUBECONFIG=$(hyperctl kubeconfig mgmt)
 ```
 
-`kubeconfig` names the context, cluster and user of each kubeconfig after the
-cluster (the user gets an `-admin` suffix), so that both can be combined. If the
-hosted kubeconfig is not saved locally, it fetches and caches it from the
-management cluster as soon as the admin kubeconfig secret exists, even during
-installation. Until then, the default command returns only the management
-kubeconfig; `kubeconfig hosted` reports that it is not available yet. Cached
-kubeconfigs work without contacting the management cluster.
-`kubeconfig mgmt` never queries it. Kubeconfig availability does not mean the
-hosted cluster is Ready.
+`kubeconfig` names the context, cluster and user of each kubeconfig after the cluster (the user gets an `-admin` suffix), so that both can be combined.
+If the hosted kubeconfig is not saved locally, it fetches and caches it from the management cluster as soon as the admin kubeconfig secret exists, even during installation.
+Until then, the default command returns only the management kubeconfig; `kubeconfig hosted` reports that it is not available yet.
+Cached kubeconfigs work without contacting the management cluster.
+`kubeconfig mgmt` never queries it.
+Kubeconfig availability does not mean the hosted cluster is Ready.
 
-`create` installs a management cluster and the HyperShift operator. Interactive
-setup remembers the previous choice between management-only and hosted-cluster
-modes. Use `--management-only` or `--management-only=false` to select a mode
-non-interactively. Hosted-cluster mode creates an AutoNode-enabled cluster.
-Re-running `create` skips an installed management cluster. If hosted-cluster
-creation fails, clean up only that cluster with `hyperctl destroy hosted` before
-retrying; the management cluster remains installed.
+`create` installs a management cluster and the HyperShift operator.
+Interactive setup remembers the previous choice between management-only and hosted-cluster modes.
+Use `--management-only` or `--management-only=false` to select a mode non-interactively.
+Hosted-cluster mode creates an AutoNode-enabled cluster.
+Re-running `create` skips an installed management cluster.
+If hosted-cluster creation fails, clean up only that cluster with `hyperctl destroy hosted` before retrying; the management cluster remains installed.
 
-1. Check the AWS account: IAM user credentials, EC2 Spot service-linked role,
-   OIDC bucket (created and made public-readable if missing), DNS leftovers
-2. Install the management cluster with `openshift-install` (about 45 minutes),
-   by default as 3 control-plane and 1 worker `t3a.xlarge` nodes in one zone
-3. Install the HyperShift operator, by default with the standalone
-   karpenter-operator (`--enable-standalone-karpenter-operator`). Use
-   `--standalone-karpenter-operator=false` for the one embedded in the
-   HyperShift operator image. The `hyperctl image karpenter-operator` override
-   only applies to the standalone one. Re-running `create` with a different
-   value switches the mode of the installed operator.
-4. Unless management-only mode is selected, create the AutoNode hosted cluster
-   and write its kubeconfig
+1. Check the AWS account: IAM user credentials, EC2 Spot service-linked role, OIDC bucket (created and made public-readable if missing), DNS leftovers
+2. Install the management cluster with `openshift-install` (about 45 minutes), by default as 3 control-plane and 1 worker `t3a.xlarge` nodes in one zone
+3. Install the HyperShift operator, by default with the standalone karpenter-operator (`--enable-standalone-karpenter-operator`).
+   Use `--standalone-karpenter-operator=false` for the one embedded in the HyperShift operator image.
+   The `hyperctl image karpenter-operator` override only applies to the standalone one.
+   Re-running `create` with a different value switches the mode of the installed operator.
+4. Unless management-only mode is selected, create the AutoNode hosted cluster and write its kubeconfig
 
-`hyperctl create --help` lists all flags and defaults. Set `--workers=0` to
-install a three-node compact management cluster without a worker.
+`hyperctl create --help` lists all flags and defaults.
+Set `--workers=0` to install a three-node compact management cluster without a worker.
 
 | Command | Purpose |
 |---|---|
@@ -93,20 +81,14 @@ install a three-node compact management cluster without a worker.
 | `hyperctl releases [stream]` | List release streams or the accepted releases of a stream (`--all` for all) |
 | `hyperctl cache clean` | Remove cached installer binaries |
 
-Releases are given as a version of an official release (`5.1.0-ec.0`) or as a
-release image pull spec, e.g. of a nightly. Interactively, `create` lets you
-browse the [release controller](https://amd64.ocp.releases.ci.openshift.org/).
+Releases are given as a version of an official release (`5.1.0-ec.0`) or as a release image pull spec, e.g. of a nightly.
+Interactively, `create` lets you browse the [release controller](https://amd64.ocp.releases.ci.openshift.org/).
 
-`image` sets the `hypershift.openshift.io/karpenter-operator-image` or
-`hypershift.openshift.io/karpenter-provider-aws-image` annotation of the
-hosted cluster, which rolls out the deployment. Setting an unchanged image
-restarts the pods instead; hypershift only pulls `:latest` images again, other
-tags may be served from the node's image cache.
+`image` sets the `hypershift.openshift.io/karpenter-operator-image` or `hypershift.openshift.io/karpenter-provider-aws-image` annotation of the hosted cluster, which rolls out the deployment.
+Setting an unchanged image restarts the pods instead; hypershift only pulls `:latest` images again, other tags may be served from the node's image cache.
 
-Instances of stopped clusters get pruned, which leaves broken clusters and
-Route53 records behind. `status` detects an unreachable management cluster,
-`create` and `destroy` list DNS leftovers of previous clusters with the same
-names and delete them after confirmation (or with `--yes`).
+Instances of stopped clusters get pruned, which leaves broken clusters and Route53 records behind.
+`status` detects an unreachable management cluster, `create` and `destroy` list DNS leftovers of previous clusters with the same names and delete them after confirmation (or with `--yes`).
 
 ## Files
 
@@ -119,8 +101,8 @@ hyperctl follows the XDG Base Directory Specification on macOS and Linux:
 | State | `~/.local/state/hyperctl` | Current cluster, last used release |
 | Cache | `~/.cache/hyperctl` | `openshift-install` binaries per release |
 
-Config values override built-in defaults, flags override config values. The
-SSH key is asked once and saved; `sshKey: ""` disables it.
+Config values override built-in defaults, flags override config values.
+The SSH key is asked once and saved; `sshKey: ""` disables it.
 
 ```yaml
 region: us-east-1
