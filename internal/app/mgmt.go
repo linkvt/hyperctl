@@ -50,7 +50,7 @@ func installMgmtCluster(ctx context.Context, p progress, account AWSAccount, dir
 	}
 
 	var zone string
-	if opts.Workers == 0 {
+	if opts.Workers == 0 || opts.Workers == compactWorkerCount {
 		err := p.wait(ctx, "Choosing an availability zone", func(ctx context.Context) error {
 			var err error
 			zone, err = account.FirstZone(ctx, opts.Region)

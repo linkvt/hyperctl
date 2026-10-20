@@ -61,7 +61,7 @@ Re-running `create` skips what already exists:
 1. Check the AWS account: IAM user credentials, EC2 Spot service-linked role,
    OIDC bucket (created and made public-readable if missing), DNS leftovers
 2. Install the management cluster with `openshift-install` (about 45 minutes),
-   by default as a compact cluster of 3 `t3a.xlarge` nodes in one zone
+   by default as 3 control-plane and 1 worker `t3a.xlarge` nodes in one zone
 3. Install the HyperShift operator, by default with the standalone
    karpenter-operator (`--enable-standalone-karpenter-operator`). Use
    `--standalone-karpenter-operator=false` for the one embedded in the
@@ -71,7 +71,8 @@ Re-running `create` skips what already exists:
 4. Unless management-only mode is selected, create the AutoNode hosted cluster
    and write its kubeconfig
 
-`hyperctl create --help` lists all flags and defaults.
+`hyperctl create --help` lists all flags and defaults. Set `--workers=0` to
+install a three-node compact management cluster without a worker.
 
 | Command | Purpose |
 |---|---|

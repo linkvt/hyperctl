@@ -106,7 +106,7 @@ func promptSize(ctx context.Context, opts *createOptions) error {
 			selected = i
 		}
 	}
-	options = append(options, huh.NewOption("Compact with a custom instance type in 1 zone", customSize))
+	options = append(options, huh.NewOption("Compact with a custom instance type and 1 worker in 1 zone", customSize))
 	if err := huh.NewForm(huh.NewGroup(
 		huh.NewSelect[int]().Title("Management cluster size").Options(options...).Value(&selected),
 	)).RunWithContext(ctx); err != nil {
@@ -118,7 +118,7 @@ func promptSize(ctx context.Context, opts *createOptions) error {
 		opts.Workers = sizePresets[selected].workers
 		return nil
 	}
-	opts.Workers = 0
+	opts.Workers = compactWorkerCount
 	return huh.NewForm(huh.NewGroup(
 		huh.NewInput().
 			Title("EC2 instance type").

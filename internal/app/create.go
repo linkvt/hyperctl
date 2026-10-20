@@ -55,7 +55,7 @@ func createCommand(deps Deps) *cli.Command {
 			&cli.BoolFlag{Name: "standalone-karpenter-operator", Value: true, Usage: "Run the standalone karpenter-operator in hosted clusters, =false runs the one embedded in the HyperShift operator image"},
 			&cli.StringFlag{Name: "hosted-name", Usage: "Hosted cluster name (default: <name>-workload)"},
 			&cli.StringFlag{Name: "instance-type", Usage: "EC2 instance type of the management cluster nodes (default: " + defaultInstanceType + ")"},
-			&cli.IntFlag{Name: "workers", Usage: "Worker nodes of the management cluster, 0 runs a compact cluster in a single zone (default: 0)"},
+			&cli.IntFlag{Name: "workers", Usage: "Worker nodes of the management cluster (default: 1; 0 disables workers)"},
 			&cli.StringFlag{Name: "hypershift", Usage: "Path to the hypershift binary (default: from PATH)"},
 			&cli.StringFlag{Name: "oidc-bucket", Usage: "S3 bucket for OIDC discovery documents, created if missing (default: $USER-hypershift-oidc)"},
 		},
@@ -311,6 +311,7 @@ func defaultCreateOptions(deps Deps, dirs xdg.Dirs, st state, cfg config) (creat
 		PullSecret:     cmp.Or(cfg.PullSecret, filepath.Join(home, ".openshift", "pull-secret-latest.json")),
 		OIDCBucket:     cfg.OIDCBucket,
 		InstanceType:   cmp.Or(cfg.MgmtInstanceType, defaultInstanceType),
+		Workers:        compactWorkerCount,
 	}
 	if cfg.MgmtWorkers != nil {
 		opts.Workers = *cfg.MgmtWorkers
