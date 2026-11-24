@@ -41,3 +41,20 @@ func TestParseRelease(t *testing.T) {
 		})
 	}
 }
+
+func TestReleaseRegistry(t *testing.T) {
+	tests := map[string]struct {
+		ref  string
+		want string
+	}{
+		"version": {ref: "5.1.0-ec.0", want: "quay.io"},
+		"nightly": {ref: "registry.ci.openshift.org/ocp/release-5:5.1.0-0.nightly", want: "registry.ci.openshift.org"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := ocp.ParseRelease(tt.ref).Registry(); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

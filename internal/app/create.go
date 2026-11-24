@@ -13,6 +13,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/linkvt/hyperctl/internal/hypershift"
+	"github.com/linkvt/hyperctl/internal/ocp"
 	"github.com/linkvt/hyperctl/internal/releases"
 	"github.com/linkvt/hyperctl/internal/xdg"
 )
@@ -308,7 +309,54 @@ func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, dep
 	if len(missing) > 0 {
 		return createOptions{}, fmt.Errorf("missing required values: %s", strings.Join(missing, ", "))
 	}
+	if err := checkReleasePullable(ctx, p, opts); err != nil {
+		return createOptions{}, err
+	}
 	return opts, nil
+}
+
+// pullCheckTimeout bounds the release image pull check.
+const pullCheckTimeout = 30 * time.Second
+
+// ciRegistry is the registry of CI release images, its credentials come from
+// an oc login token of the CI cluster.
+const ciRegistry = "registry.ci.openshift.org"
+
+// ciLoginURL is where to copy an oc login command with a token for the CI
+// cluster from, which logs in to ciServer.
+const (
+	ciLoginURL = "https://oauth-openshift.apps.ci.l2s4.p1.openshiftapps.com/oauth/token/request"
+	ciServer   = "https://api.ci.l2s4.p1.openshiftapps.com:6443"
+)
+
+// checkReleasePullable fails if the release image cannot be read with the pull
+// secret, instead of failing when the image is first pulled.
+func checkReleasePullable(ctx context.Context, p progress, opts createOptions) error {
+	release := ocp.ParseRelease(opts.Release)
+	err := p.wait(ctx, "Checking access to "+release.PullSpec, func(ctx context.Context) error {
+		ctx, cancel := context.WithTimeout(ctx, pullCheckTimeout)
+		defer cancel()
+		return ocp.CheckPullable(ctx, release, opts.PullSecret)
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "unauthorized") {
+			return fmt.Errorf("%w\n%s", err, loginHint(release.Registry(), opts.PullSecret))
+		}
+		return err
+	}
+	p.done("%s is pullable", release.PullSpec)
+	return nil
+}
+
+// loginHint explains how to add credentials for the registry to the pull
+// secret.
+func loginHint(registry, pullSecret string) string {
+	if registry == ciRegistry {
+		return fmt.Sprintf("log in to the CI cluster and save its token to the pull secret:\n  1. copy the oc login command (--server=%s) from %s and run it\n  2. oc registry login --registry %s --to %s",
+			ciServer, ciLoginURL, registry, pullSecret)
+	}
+	return fmt.Sprintf("add credentials for %s to the pull secret with: oc registry login --registry %s --auth-basic=USER:PASSWORD --to %s",
+		registry, registry, pullSecret)
 }
 
 // defaultCreateOptions returns the built-in defaults, overridden by the

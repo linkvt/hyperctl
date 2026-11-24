@@ -726,3 +726,40 @@ func readFile(t *testing.T, path string) string {
 	}
 	return strings.TrimSpace(string(b))
 }
+
+func TestCreateFailsEarlyWhenReleaseImageIsNotPullable(t *testing.T) {
+	env := newTestEnv(t)
+	t.Setenv("HYPERCTL_TEST_RELEASE_INFO_ERROR", "error: unable to read image: unauthorized: authentication required")
+
+	_, err := env.runErr(t, "create",
+		"--release", "registry.ci.openshift.org/ocp/release-5:5.1.0-0.nightly-2026-09-25-074941",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	)
+
+	for _, want := range []string{"unauthorized", "oc registry login --registry registry.ci.openshift.org --to " + env.pullSecret} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("expected error containing %q, got %v", want, err)
+		}
+	}
+	if calls := env.installerCalls(t); len(calls) != 0 {
+		t.Errorf("expected no installer calls, got %d", len(calls))
+	}
+}
+
+func TestCreateChecksReleaseImageWithPullSecret(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.run(t, "create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	)
+
+	want := "adm release info --registry-config=" + env.pullSecret + " quay.io/openshift-release-dev/ocp-release:5.1.0-ec.0-x86_64"
+	if calls := env.ocCalls(t, want); len(calls) == 0 {
+		t.Errorf("expected oc call %q", want)
+	}
+}

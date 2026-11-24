@@ -1,6 +1,11 @@
 package ocp
 
-import "strings"
+import (
+	"context"
+	"fmt"
+	"os/exec"
+	"strings"
+)
 
 const (
 	quayReleaseRepo = "quay.io/openshift-release-dev/ocp-release"
@@ -26,4 +31,27 @@ func ParseRelease(ref string) Release {
 		name = strings.TrimSuffix(tag, quayArchSuffix)
 	}
 	return Release{Name: name, PullSpec: ref}
+}
+
+// Registry returns the host of the registry serving the release image.
+func (r Release) Registry() string {
+	host, _, _ := strings.Cut(r.PullSpec, "/")
+	return host
+}
+
+// CheckPullable verifies that the release image can be read with the pull
+// secret.
+func CheckPullable(ctx context.Context, release Release, pullSecretPath string) error {
+	cmd := exec.CommandContext(ctx, "oc", "adm", "release", "info",
+		"--registry-config="+pullSecretPath,
+		release.PullSpec,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		detail := strings.TrimSpace(string(out))
+		if detail == "" {
+			detail = err.Error()
+		}
+		return fmt.Errorf("the release image %s cannot be pulled with the pull secret %s:\n%s", release.PullSpec, pullSecretPath, detail)
+	}
+	return nil
 }

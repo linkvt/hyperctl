@@ -49,6 +49,9 @@ echo "$*" > "$d/args"
 annotations="$HYPERCTL_TEST_LOG/annotations"
 mkdir -p "$annotations"
 case "$*" in
+  *"adm release info"*)
+    [ -z "$HYPERCTL_TEST_RELEASE_INFO_ERROR" ] || { printf '%s\n' "$HYPERCTL_TEST_RELEASE_INFO_ERROR" >&2; exit 1; }
+    exit 0 ;;
   *"get --raw /readyz"*) [ -z "$HYPERCTL_TEST_API_DOWN" ] || exit 1; echo ok; exit 0 ;;
   *"get hostedcluster"*"-o json")
     if [ -n "$HYPERCTL_TEST_KUBECONFIG_ERROR" ]; then
