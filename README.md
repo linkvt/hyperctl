@@ -78,7 +78,7 @@ Set `--workers=0` to install a three-node compact management cluster without a w
 | `hyperctl status` | Show the clusters, whether the management cluster responds and the hosted cluster is available |
 | `hyperctl kubeconfig [hosted\|mgmt]` | Print the kubeconfig paths of both clusters for `KUBECONFIG`, or of one |
 | `hyperctl destroy [all\|hosted\|shared]` | Destroy the hosted and, by default, the management cluster, or the shared Azure resources |
-| `hyperctl image karpenter-operator\|karpenter <image>` | Override the Karpenter operator or Karpenter image of the hosted cluster (`--reset` to remove) |
+| `hyperctl image karpenter-operator\|karpenter-provider <image>` | Override the Karpenter operator or Karpenter provider image of the hosted cluster (`--reset` to remove) |
 | `hyperctl releases [stream]` | List release streams or the accepted releases of a stream (`--all` for all) |
 | `hyperctl cache clean` | Remove cached installer binaries |
 
@@ -120,7 +120,7 @@ The service principal credentials and the signing key are kept in `~/.local/shar
 
 `destroy` deletes the HostedCluster, the External DNS records, the `*.apps` record of the hosted cluster in the base domain zone (only if owned by its infra ID), the role assignment of the ingress identity on that zone, the resource groups and workload identities of the hosted cluster and the resource group of the AKS cluster.
 
-`hyperctl image karpenter` only works on AWS, hypershift has no Karpenter image override for Azure.
+`hyperctl image karpenter-provider` only works on AWS, hypershift has no Karpenter provider image override for Azure.
 
 ## Files
 

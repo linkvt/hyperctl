@@ -33,8 +33,8 @@ var imageComponents = []imageComponent{
 		selector:   "app=karpenter-operator",
 	},
 	{
-		name:       "karpenter",
-		title:      "Karpenter",
+		name:       "karpenter-provider",
+		title:      "Karpenter provider",
 		annotation: "hypershift.openshift.io/karpenter-provider-aws-image",
 		selector:   "app=karpenter",
 		awsOnly:    true,

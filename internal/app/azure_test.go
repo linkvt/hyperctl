@@ -536,7 +536,7 @@ func TestImageKarpenterIsRefusedOnAzure(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)
 
-	_, err := env.runErr(t, "image", "karpenter", "quay.io/example/karpenter:latest")
+	_, err := env.runErr(t, "image", "karpenter-provider", "quay.io/example/karpenter:latest")
 
 	if err == nil || !strings.Contains(err.Error(), "only on AWS") {
 		t.Errorf("expected an AWS-only error, got %v", err)

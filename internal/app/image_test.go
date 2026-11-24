@@ -15,9 +15,9 @@ func TestImageSetsOverride(t *testing.T) {
 			component: "karpenter-operator",
 			want:      `(?m)^  Image overrides:\n    Karpenter operator:\s+quay.io/test/karpenter-operator:dev$`,
 		},
-		"karpenter": {
-			component: "karpenter",
-			want:      `(?m)^  Image overrides:\n    Karpenter:\s+quay.io/test/karpenter-operator:dev$`,
+		"karpenter provider": {
+			component: "karpenter-provider",
+			want:      `(?m)^  Image overrides:\n    Karpenter provider:\s+quay.io/test/karpenter-operator:dev$`,
 		},
 	}
 	for name, tc := range tests {
