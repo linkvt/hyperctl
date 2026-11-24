@@ -26,9 +26,11 @@ const (
 	phaseInstalled  clusterPhase = "Installed"
 )
 
-// platformAWS is the only supported platform. Records carry the platform so
-// that further platforms can be added without migrating them.
-const platformAWS = "aws"
+// Platforms of the clusters.
+const (
+	platformAWS   = "aws"
+	platformAzure = "azure"
+)
 
 // clusterRecord is what hyperctl remembers about a management or hosted
 // cluster, including what is needed to destroy it.
@@ -38,13 +40,26 @@ type clusterRecord struct {
 	Release    string       `json:"release"`
 	Region     string       `json:"region"`
 	BaseDomain string       `json:"baseDomain"`
-	// InfraID tags the AWS resources of a hosted cluster.
+	// InfraID tags the cloud resources of a hosted cluster.
 	InfraID string `json:"infraID,omitempty"`
+	// Azure holds the Azure resources a hosted cluster depends on.
+	Azure *azureRecord `json:"azure,omitempty"`
 	// PullSecret is the pull secret path, needed to extract the installer
 	// again for destroying a management cluster.
 	PullSecret string `json:"pullSecret,omitempty"`
 	// UpdatedAt is the time of the last change, set when saving the record.
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// azureRecord are the shared Azure resources a hosted cluster was created
+// with, needed to destroy it even if the configuration changed since.
+type azureRecord struct {
+	// ResourceGroup holds the workload identities and the DNS zone.
+	ResourceGroup string `json:"resourceGroup"`
+	// DNSZone is the External DNS zone.
+	DNSZone string `json:"dnsZone"`
+	// BaseDomainResourceGroup holds the DNS zone of the base domain.
+	BaseDomainResourceGroup string `json:"baseDomainResourceGroup"`
 }
 
 func loadState(stateDir string) (state, error) {

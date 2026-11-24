@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/urfave/cli/v3"
@@ -19,6 +20,9 @@ type imageComponent struct {
 	annotation string
 	// selector matches the component's pods in the control plane namespace.
 	selector string
+	// awsOnly is set for components whose annotation hypershift only
+	// supports on AWS.
+	awsOnly bool
 }
 
 var imageComponents = []imageComponent{
@@ -33,6 +37,7 @@ var imageComponents = []imageComponent{
 		title:      "Karpenter",
 		annotation: "hypershift.openshift.io/karpenter-provider-aws-image",
 		selector:   "app=karpenter",
+		awsOnly:    true,
 	},
 }
 
@@ -75,6 +80,13 @@ func runImage(ctx context.Context, cmd *cli.Command, component imageComponent) e
 	}
 	if st.HostedCluster == "" {
 		return errors.New("no hosted cluster, run hyperctl create")
+	}
+	platform, err := trackedPlatform(dirs, st)
+	if err != nil {
+		return err
+	}
+	if component.awsOnly && platform != platformAWS {
+		return fmt.Errorf("hypershift supports overriding the %s image only on AWS", component.title)
 	}
 	kubeconfig := mgmtKubeconfigPath(dirs, st.MgmtCluster)
 	annotations, err := oc.HostedClusterAnnotations(ctx, kubeconfig, st.HostedCluster)

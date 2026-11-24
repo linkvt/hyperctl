@@ -16,6 +16,8 @@ func installDir(dirs xdg.Dirs, name string) string {
 	return filepath.Join(clusterDir(dirs, name), "install")
 }
 
+// mgmtKubeconfigPath is where the installer writes the admin kubeconfig. For
+// AKS clusters hyperctl writes it to the same place.
 func mgmtKubeconfigPath(dirs xdg.Dirs, name string) string {
 	return filepath.Join(installDir(dirs, name), "auth", "kubeconfig")
 }
@@ -27,4 +29,9 @@ func hostedDir(dirs xdg.Dirs, mgmt, hosted string) string {
 
 func hostedKubeconfigPath(dirs xdg.Dirs, mgmt, hosted string) string {
 	return filepath.Join(hostedDir(dirs, mgmt, hosted), "kubeconfig")
+}
+
+// azureDir holds the credentials and keys of the shared Azure resources.
+func azureDir(dirs xdg.Dirs) string {
+	return filepath.Join(dirs.Data, "azure")
 }

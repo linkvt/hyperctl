@@ -40,21 +40,32 @@ func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, clie
 		opts.Release = release
 	}
 
+	regionTitle := "AWS region"
+	regionDescription := ""
+	if opts.Platform == platformAzure {
+		regionTitle = "Azure location"
+		regionDescription = "e.g. " + defaultAzureLocation + ", germanywestcentral, eastus"
+	}
 	var fields []huh.Field
 	for _, input := range []struct {
-		flag  string
-		title string
-		value *string
+		flag        string
+		title       string
+		description string
+		value       *string
 	}{
-		{"region", "AWS region", &opts.Region},
-		{"base-domain", "Base domain", &opts.BaseDomain},
-		{"name", "Management cluster name", &opts.Name},
-		{"pull-secret", "Pull secret file", &opts.PullSecret},
+		{"region", regionTitle, regionDescription, &opts.Region},
+		{"base-domain", "Base domain", "", &opts.BaseDomain},
+		{"name", "Management cluster name", "", &opts.Name},
+		{"pull-secret", "Pull secret file", "", &opts.PullSecret},
 	} {
 		if cmd.IsSet(input.flag) {
 			continue
 		}
-		fields = append(fields, huh.NewInput().Title(input.title).Value(input.value).Validate(requireValue))
+		field := huh.NewInput().Title(input.title).Value(input.value).Validate(requireValue)
+		if input.description != "" {
+			field = field.Description(input.description)
+		}
+		fields = append(fields, field)
 	}
 	if !opts.ManagementOnly && !cmd.IsSet("hosted-name") {
 		fields = append(fields, huh.NewInput().
@@ -81,7 +92,7 @@ func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, clie
 			return err
 		}
 	}
-	if !cmd.IsSet("instance-type") && !cmd.IsSet("workers") {
+	if opts.Platform == platformAWS && !cmd.IsSet("instance-type") && !cmd.IsSet("workers") {
 		if err := promptSize(ctx, opts); err != nil {
 			return err
 		}
@@ -296,8 +307,8 @@ func confirmCreateOptions(ctx context.Context, opts createOptions) error {
 	if opts.ManagementOnly {
 		setup = "Management cluster only"
 	}
-	summary := fmt.Sprintf("Setup:          %s\nRelease:        %s\nRegion:         %s\nBase domain:    %s\nMgmt cluster:   %s\nMgmt size:      %s",
-		setup, opts.Release, opts.Region, opts.BaseDomain, opts.Name, describeSize(opts))
+	summary := fmt.Sprintf("Platform:       %s\nSetup:          %s\nRelease:        %s\nRegion:         %s\nBase domain:    %s\nMgmt cluster:   %s\nMgmt size:      %s",
+		opts.Platform, setup, opts.Release, opts.Region, opts.BaseDomain, opts.Name, describeSize(opts))
 	if !opts.ManagementOnly {
 		hostedName := opts.HostedName
 		if hostedName == "" {
@@ -305,7 +316,10 @@ func confirmCreateOptions(ctx context.Context, opts createOptions) error {
 		}
 		summary += fmt.Sprintf("\nHosted cluster: %s", hostedName)
 	}
-	summary += fmt.Sprintf("\nPull secret:    %s\nSSH key:        %s\nOIDC bucket:    %s", opts.PullSecret, sshKey, opts.OIDCBucket)
+	summary += fmt.Sprintf("\nPull secret:    %s\nSSH key:        %s", opts.PullSecret, sshKey)
+	if opts.Platform == platformAWS {
+		summary += fmt.Sprintf("\nOIDC bucket:    %s", opts.OIDCBucket)
+	}
 	karpenterOperator := "embedded"
 	if opts.StandaloneKarpenterOperator {
 		karpenterOperator = "standalone"
