@@ -462,6 +462,38 @@ func TestDestroyAzureHostedWhenManagementClusterIsUnreachable(t *testing.T) {
 	}
 }
 
+func TestDestroyAzureHostedWhenControlPlaneNamespaceIsAlreadyGone(t *testing.T) {
+	env := newTestEnv(t)
+	env.createAzureClusters(t)
+	infraID := env.hostedInfraID(t)
+	t.Setenv("HYPERCTL_TEST_WAIT_ERROR", "error: no matching resources found")
+	t.Setenv("HYPERCTL_TEST_NAMESPACE_GONE", "1")
+
+	env.run(t, "destroy", "hosted", "--yes")
+
+	if !slices.Contains(env.azure.deletedResourceGroups, "test-mgmt-workload-"+infraID) {
+		t.Errorf("expected the hosted cluster resource groups to be deleted, got %v", env.azure.deletedResourceGroups)
+	}
+	if _, err := env.runErr(t, "kubeconfig", "hosted"); err == nil {
+		t.Error("expected no hosted cluster after destroy")
+	}
+}
+
+func TestDestroyAzureHostedFailsWhenControlPlaneNamespaceRemains(t *testing.T) {
+	env := newTestEnv(t)
+	env.createAzureClusters(t)
+	t.Setenv("HYPERCTL_TEST_WAIT_ERROR", "error: no matching resources found")
+
+	_, err := env.runErr(t, "destroy", "hosted", "--yes")
+
+	if err == nil || !strings.Contains(err.Error(), "waiting for namespace clusters-test-mgmt-workload to be deleted") {
+		t.Errorf("expected a namespace wait error, got %v", err)
+	}
+	if len(env.azure.deletedResourceGroups) != 0 {
+		t.Errorf("expected no Azure resources to be deleted, got %v", env.azure.deletedResourceGroups)
+	}
+}
+
 func TestDestroySharedAzureResources(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)

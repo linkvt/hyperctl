@@ -42,6 +42,8 @@ users:
 // files in $HYPERCTL_TEST_LOG/annotations. HYPERCTL_TEST_HOSTED_KUBECONFIG_SECRET
 // names the hosted kubeconfig secret, whose content is read from the file at
 // HYPERCTL_TEST_HOSTED_KUBECONFIG. HYPERCTL_TEST_KUBECONFIG_ERROR fails lookups.
+// Waiting for a deleted namespace fails with HYPERCTL_TEST_WAIT_ERROR, and
+// HYPERCTL_TEST_NAMESPACE_GONE makes namespace lookups find nothing.
 const fakeOC = `#!/bin/sh
 d="$HYPERCTL_TEST_LOG/oc-$(ls "$HYPERCTL_TEST_LOG" | grep -c '^oc-')"
 mkdir -p "$d"
@@ -89,7 +91,20 @@ case "$*" in
   *"delete pod"*) exit 0 ;;
   *"apply --server-side"*) exit 0 ;;
   *"delete hostedcluster"*) exit 0 ;;
-  *"wait --for=delete"*) exit 0 ;;
+  *"wait --for=delete"*)
+    if [ -n "$HYPERCTL_TEST_WAIT_ERROR" ]; then
+      printf '%s\n' "$HYPERCTL_TEST_WAIT_ERROR" >&2
+      exit 1
+    fi
+    exit 0 ;;
+  *"get namespace "*)
+    if [ -n "$HYPERCTL_TEST_NAMESPACE_GONE" ]; then exit 0; fi
+    prev=""
+    for a in "$@"; do
+      if [ "$prev" = "namespace" ]; then printf 'namespace/%s\n' "$a"; exit 0; fi
+      prev="$a"
+    done
+    exit 0 ;;
 esac
 for a in "$@"; do
   case "$a" in --to=*) to="${a#--to=}" ;; esac

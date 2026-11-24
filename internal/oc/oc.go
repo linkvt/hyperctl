@@ -91,8 +91,23 @@ func DeleteHostedCluster(ctx context.Context, kubeconfig, name, controlPlaneName
 	if _, err := run(ctx, kubeconfig, "delete", "hostedcluster", name, "-n", "clusters", "--ignore-not-found", "--timeout=30m"); err != nil {
 		return fmt.Errorf("deleting hosted cluster %s: %w", name, err)
 	}
-	if _, err := run(ctx, kubeconfig, "wait", "--for=delete", "namespace/"+controlPlaneNamespace, "--timeout=15m"); err != nil {
-		return fmt.Errorf("waiting for namespace %s to be deleted: %w", controlPlaneNamespace, err)
+	return waitNamespaceDeleted(ctx, kubeconfig, controlPlaneNamespace)
+}
+
+// waitNamespaceDeleted waits until the namespace is gone. A namespace that
+// was already deleted counts as gone, which waiting for it does not report
+// consistently.
+func waitNamespaceDeleted(ctx context.Context, kubeconfig, namespace string) error {
+	_, waitErr := run(ctx, kubeconfig, "wait", "--for=delete", "namespace/"+namespace, "--timeout=15m")
+	if waitErr == nil {
+		return nil
+	}
+	out, err := run(ctx, kubeconfig, "get", "namespace", namespace, "--ignore-not-found", "-o", "name")
+	if err != nil {
+		return fmt.Errorf("checking namespace %s: %w", namespace, err)
+	}
+	if strings.TrimSpace(string(out)) != "" {
+		return fmt.Errorf("waiting for namespace %s to be deleted: %w", namespace, waitErr)
 	}
 	return nil
 }
