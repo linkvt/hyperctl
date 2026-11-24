@@ -24,6 +24,9 @@ var sizePresets = []sizePreset{
 
 // describeSize describes the management cluster size for the summary.
 func describeSize(opts createOptions) string {
+	if opts.Platform == platformAzure {
+		return fmt.Sprintf("AKS with %d nodes %s", opts.Workers, opts.InstanceType)
+	}
 	if opts.Workers == 0 {
 		return fmt.Sprintf("3 nodes %s, compact in 1 zone", opts.InstanceType)
 	}

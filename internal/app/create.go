@@ -30,11 +30,14 @@ type createOptions struct {
 	OIDCBucket     string
 	HostedName     string
 	ManagementOnly bool
+	// Platform is platformAWS or platformAzure.
+	Platform string
 	// StandaloneKarpenterOperator installs the HyperShift operator so that
 	// hosted clusters run the standalone karpenter-operator instead of the one
 	// embedded in the HyperShift image.
 	StandaloneKarpenterOperator bool
-	// InstanceType and Workers size the management cluster, see mgmtSize.
+	// InstanceType and Workers size the management cluster, see mgmtSize. On
+	// Azure they are the VM size and number of the AKS nodes.
 	InstanceType string
 	Workers      int
 }
@@ -45,8 +48,9 @@ func createCommand(deps Deps) *cli.Command {
 		Usage: "Create the management cluster",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "release", Usage: "OCP release version, e.g. 5.1.0-ec.0, or release image pull spec (default: last used)"},
-			&cli.StringFlag{Name: "region", Usage: "AWS region (default: region of the AWS profile)"},
-			&cli.StringFlag{Name: "base-domain", Usage: "Route53 base domain (default: " + defaultBaseDomain + ")"},
+			&cli.StringFlag{Name: "platform", Usage: "Cloud platform of the clusters, aws or azure (default: last used, or aws)"},
+			&cli.StringFlag{Name: "region", Usage: "AWS region or Azure location, e.g. westus3 or germanywestcentral (default: AWS profile region, last used Azure location, or " + defaultAzureLocation + ")"},
+			&cli.StringFlag{Name: "base-domain", Usage: "Base domain with a public DNS zone (default: " + defaultBaseDomain + ", on Azure " + defaultAzureBaseDomain + ")"},
 			&cli.StringFlag{Name: "name", Usage: "Management cluster name (default: $USER-karpenter)"},
 			&cli.StringFlag{Name: "pull-secret", Usage: "Path to the pull secret file (default: ~/.openshift/pull-secret-latest.json)"},
 			&cli.StringFlag{Name: "ssh-key", Usage: "Path to an SSH public key for node access (optional)"},
@@ -54,8 +58,8 @@ func createCommand(deps Deps) *cli.Command {
 			&cli.BoolFlag{Name: "management-only", Usage: "Create the management cluster and install the HyperShift operator without creating a hosted cluster"},
 			&cli.BoolFlag{Name: "standalone-karpenter-operator", Value: true, Usage: "Run the standalone karpenter-operator in hosted clusters, =false runs the one embedded in the HyperShift operator image"},
 			&cli.StringFlag{Name: "hosted-name", Usage: "Hosted cluster name (default: <name>-workload)"},
-			&cli.StringFlag{Name: "instance-type", Usage: "EC2 instance type of the management cluster nodes (default: " + defaultInstanceType + ")"},
-			&cli.IntFlag{Name: "workers", Usage: "Worker nodes of the management cluster (default: 1; 0 disables workers)"},
+			&cli.StringFlag{Name: "instance-type", Usage: "EC2 instance type or Azure VM size of the management cluster nodes (default: " + defaultInstanceType + ", on Azure " + defaultAzureVMSize + ")"},
+			&cli.IntFlag{Name: "workers", Usage: "Worker nodes of the management cluster, on Azure the number of AKS nodes (default: 1, on Azure 3; 0 disables workers on AWS)"},
 			&cli.StringFlag{Name: "hypershift", Usage: "Path to the hypershift binary (default: from PATH)"},
 			&cli.StringFlag{Name: "oidc-bucket", Usage: "S3 bucket for OIDC discovery documents, created if missing (default: $USER-hypershift-oidc)"},
 		},
@@ -68,17 +72,6 @@ func createCommand(deps Deps) *cli.Command {
 func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	p := progress{w: cmd.Root().Writer, interactive: deps.Interactive}
 	p.step("Checking prerequisites")
-	var identity string
-	err := p.wait(ctx, "Checking the AWS identity", func(ctx context.Context) error {
-		var err error
-		identity, err = requireIAMUser(ctx, deps.AWS)
-		return err
-	})
-	if err != nil {
-		return err
-	}
-	p.done("AWS identity %s", identity)
-
 	dirs, err := xdg.Resolve("hyperctl")
 	if err != nil {
 		return err
@@ -91,6 +84,24 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if err != nil {
 		return err
 	}
+	platform, err := resolvePlatform(ctx, p, cmd, deps, dirs, st)
+	if err != nil {
+		return err
+	}
+	if platform == platformAzure {
+		return runCreateAzure(ctx, p, cmd, deps, dirs, st, cfg)
+	}
+
+	var identity string
+	err = p.wait(ctx, "Checking the AWS identity", func(ctx context.Context) error {
+		var err error
+		identity, err = requireIAMUser(ctx, deps.AWS)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	p.done("AWS identity %s", identity)
 	hypershiftPath, err := resolveHypershift(ctx, cmd, deps, dirs, cfg)
 	if err != nil {
 		return err
@@ -102,7 +113,7 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	}
 	p.done("AWS credentials file %s", credentialsFile)
 
-	opts, err := resolveCreateOptions(ctx, p, cmd, deps, dirs, st, cfg)
+	opts, err := resolveCreateOptions(ctx, p, cmd, deps, dirs, st, cfg, platformAWS)
 	if err != nil {
 		return err
 	}
@@ -227,12 +238,13 @@ func awsCredentialsFile() (string, error) {
 // resolveCreateOptions takes values from flags, prompts for missing ones when
 // interactive and falls back to defaults otherwise. The SSH key is only asked
 // once and then saved to the config file.
-func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, deps Deps, dirs xdg.Dirs, st state, cfg config) (createOptions, error) {
-	defaults, err := defaultCreateOptions(deps, dirs, st, cfg)
+func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, deps Deps, dirs xdg.Dirs, st state, cfg config, platform string) (createOptions, error) {
+	defaults, err := defaultCreateOptions(deps, dirs, st, cfg, platform)
 	if err != nil {
 		return createOptions{}, err
 	}
 	opts := createOptions{
+		Platform:       platform,
 		Release:        flagOr(cmd, "release", defaults.Release),
 		Region:         flagOr(cmd, "region", defaults.Region),
 		BaseDomain:     flagOr(cmd, "base-domain", defaults.BaseDomain),
@@ -276,18 +288,21 @@ func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, dep
 		return createOptions{}, err
 	}
 
-	var missing []string
-	for _, required := range []struct{ flag, value string }{
+	required := []struct{ flag, value string }{
 		{"--release", opts.Release},
 		{"--region", opts.Region},
 		{"--base-domain", opts.BaseDomain},
 		{"--name", opts.Name},
 		{"--pull-secret", opts.PullSecret},
-		{"--oidc-bucket", opts.OIDCBucket},
 		{"--instance-type", opts.InstanceType},
-	} {
-		if required.value == "" {
-			missing = append(missing, required.flag)
+	}
+	if platform == platformAWS {
+		required = append(required, struct{ flag, value string }{"--oidc-bucket", opts.OIDCBucket})
+	}
+	var missing []string
+	for _, r := range required {
+		if r.value == "" {
+			missing = append(missing, r.flag)
 		}
 	}
 	if len(missing) > 0 {
@@ -298,7 +313,7 @@ func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, dep
 
 // defaultCreateOptions returns the built-in defaults, overridden by the
 // config file, the last used release and the tracked clusters.
-func defaultCreateOptions(deps Deps, dirs xdg.Dirs, st state, cfg config) (createOptions, error) {
+func defaultCreateOptions(deps Deps, dirs xdg.Dirs, st state, cfg config, platform string) (createOptions, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return createOptions{}, err
@@ -316,9 +331,18 @@ func defaultCreateOptions(deps Deps, dirs xdg.Dirs, st state, cfg config) (creat
 	if cfg.MgmtWorkers != nil {
 		opts.Workers = *cfg.MgmtWorkers
 	}
+	if platform == platformAzure {
+		opts.Region = cmp.Or(cfg.Azure.Location, defaultAzureLocation)
+		opts.BaseDomain = cmp.Or(cfg.Azure.BaseDomain, defaultAzureBaseDomain)
+		opts.OIDCBucket = ""
+		opts.InstanceType = cmp.Or(cfg.Azure.MgmtVMSize, defaultAzureVMSize)
+		opts.Workers = cmp.Or(cfg.Azure.MgmtNodes, defaultAKSNodes)
+	}
 	if user := os.Getenv("USER"); user != "" {
 		opts.Name = user + "-karpenter"
-		opts.OIDCBucket = cmp.Or(opts.OIDCBucket, user+"-hypershift-oidc")
+		if platform == platformAWS {
+			opts.OIDCBucket = cmp.Or(opts.OIDCBucket, user+"-hypershift-oidc")
+		}
 	}
 	if cfg.SSHKey != nil {
 		opts.SSHKey = *cfg.SSHKey

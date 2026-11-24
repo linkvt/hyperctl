@@ -11,6 +11,7 @@ import (
 
 	"github.com/linkvt/hyperctl/internal/app"
 	"github.com/linkvt/hyperctl/internal/awsaccount"
+	"github.com/linkvt/hyperctl/internal/azureaccount"
 	"github.com/linkvt/hyperctl/internal/releases"
 )
 
@@ -29,8 +30,13 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("loading AWS config: %w", err)
 	}
+	azureAccount, err := azureaccount.New()
+	if err != nil {
+		return err
+	}
 	cmd := app.New(app.Deps{
 		AWS:           awsaccount.New(awsConfig),
+		Azure:         azureAccount,
 		DefaultRegion: awsConfig.Region,
 		ReleasesURL:   releases.DefaultURL,
 		Interactive:   term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())),

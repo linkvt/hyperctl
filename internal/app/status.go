@@ -55,6 +55,7 @@ func runStatus(ctx context.Context, w io.Writer, p progress) error {
 		})
 	}
 	printPhase(w, mgmt, "hyperctl destroy")
+	field(w, "Platform", mgmt.Platform)
 	field(w, "Release", mgmt.Release)
 	field(w, "Region", mgmt.Region)
 	switch {

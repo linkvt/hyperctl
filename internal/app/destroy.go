@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -18,13 +19,14 @@ import (
 const (
 	destroyAll    = "all"
 	destroyHosted = "hosted"
+	destroyShared = "shared"
 )
 
 func destroyCommand(deps Deps) *cli.Command {
 	return &cli.Command{
 		Name:      "destroy",
-		Usage:     "Destroy the hosted cluster and, unless only hosted is given, the management cluster",
-		ArgsUsage: "[all|hosted]",
+		Usage:     "Destroy the hosted cluster and, unless only hosted is given, the management cluster, or the shared Azure resources",
+		ArgsUsage: "[all|hosted|shared]",
 		Flags: []cli.Flag{
 			&cli.BoolFlag{Name: "yes", Usage: "Do not ask for confirmation"},
 			&cli.StringFlag{Name: "hypershift", Usage: "Path to the hypershift binary (default: from PATH)"},
@@ -40,8 +42,8 @@ func runDestroy(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if scope == "" {
 		scope = destroyAll
 	}
-	if scope != destroyAll && scope != destroyHosted {
-		return fmt.Errorf("unknown scope %q, expected %s or %s", scope, destroyAll, destroyHosted)
+	if scope != destroyAll && scope != destroyHosted && scope != destroyShared {
+		return fmt.Errorf("unknown scope %q, expected %s, %s or %s", scope, destroyAll, destroyHosted, destroyShared)
 	}
 
 	dirs, err := xdg.Resolve("hyperctl")
@@ -52,8 +54,15 @@ func runDestroy(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if err != nil {
 		return err
 	}
+	if scope == destroyShared {
+		return runDestroyShared(ctx, cmd, deps, dirs, st)
+	}
 	if st.MgmtCluster == "" {
 		return errors.New("no clusters to destroy")
+	}
+	platform, err := trackedPlatform(dirs, st)
+	if err != nil {
+		return err
 	}
 	if !cmd.Bool("yes") {
 		if !deps.Interactive {
@@ -66,21 +75,13 @@ func runDestroy(ctx context.Context, cmd *cli.Command, deps Deps) error {
 
 	p := progress{w: cmd.Root().Writer, interactive: deps.Interactive}
 	if st.HostedCluster != "" {
-		cfg, err := loadConfig(dirs.Config)
-		if err != nil {
-			return err
-		}
-		hypershiftPath, err := resolveHypershift(ctx, cmd, deps, dirs, cfg)
-		if err != nil {
-			return err
-		}
-		hs := hypershift.CLI{
-			Path:       hypershiftPath,
-			Kubeconfig: mgmtKubeconfigPath(dirs, st.MgmtCluster),
-			Output:     p.tool("hypershift"),
-		}
 		p.step("Hosted cluster %s", st.HostedCluster)
-		if err := destroyHostedCluster(ctx, p, cmd.Bool("yes"), deps, hs, dirs, st.MgmtCluster, st.HostedCluster); err != nil {
+		if platform == platformAzure {
+			err = destroyAzureHostedCluster(ctx, p, deps.Azure, dirs, st.MgmtCluster, st.HostedCluster)
+		} else {
+			err = destroyAWSHostedCluster(ctx, p, cmd, deps, dirs, st.MgmtCluster, st.HostedCluster)
+		}
+		if err != nil {
 			return err
 		}
 		st.HostedCluster = ""
@@ -93,11 +94,90 @@ func runDestroy(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	}
 
 	p.step("Management cluster %s", st.MgmtCluster)
-	if err := destroyMgmtCluster(ctx, p, cmd.Bool("yes"), deps, dirs, st.MgmtCluster); err != nil {
+	if platform == platformAzure {
+		err = destroyAKSCluster(ctx, p, deps.Azure, dirs, st.MgmtCluster)
+	} else {
+		err = destroyMgmtCluster(ctx, p, cmd.Bool("yes"), deps, dirs, st.MgmtCluster)
+	}
+	if err != nil {
 		return err
 	}
 	st.MgmtCluster = ""
 	return saveState(dirs.State, st)
+}
+
+// runDestroyShared destroys the Azure resources shared by all clusters,
+// which requires that no clusters are left.
+func runDestroyShared(ctx context.Context, cmd *cli.Command, deps Deps, dirs xdg.Dirs, st state) error {
+	if st.MgmtCluster != "" {
+		return fmt.Errorf("management cluster %s exists, destroy it first", st.MgmtCluster)
+	}
+	cfg, err := loadConfig(dirs.Config)
+	if err != nil {
+		return err
+	}
+	p := progress{w: cmd.Root().Writer, interactive: deps.Interactive}
+	var subscription AzureSubscription
+	err = p.wait(ctx, "Checking the Azure login", func(ctx context.Context) error {
+		var err error
+		subscription, err = deps.Azure.Subscription(ctx)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	shared, err := newAzureShared(dirs, cfg, subscription, cmp.Or(cfg.Azure.BaseDomain, defaultAzureBaseDomain), cfg.Azure.Location)
+	if err != nil {
+		return err
+	}
+	if !cmd.Bool("yes") {
+		if !deps.Interactive {
+			return errors.New("destroying the shared Azure resources requires confirmation, pass --yes")
+		}
+		if err := confirmDestroy(ctx, []string{
+			"service principals " + shared.ServicePrincipal + " and " + shared.ExternalDNSServicePrincipal,
+			"NS record " + shared.delegationRecord() + " in " + shared.BaseDomain,
+			"resource group " + shared.ResourceGroup + " with the OIDC issuer and DNS zone " + shared.DNSZone,
+		}); err != nil {
+			return err
+		}
+	}
+	p.step("Shared Azure resources in subscription %s", subscription.Name)
+	return destroyAzureShared(ctx, p, deps.Azure, dirs, shared)
+}
+
+// trackedPlatform returns the platform of the tracked management cluster.
+// Only a cluster whose installation never started lacks a record, as create
+// writes it before the first cloud resource, and destroying such a cluster
+// is a no-op on either platform. AWS is returned then, as the default.
+func trackedPlatform(dirs xdg.Dirs, st state) (string, error) {
+	record, found, err := loadClusterRecord(clusterDir(dirs, st.MgmtCluster))
+	if err != nil {
+		return "", err
+	}
+	if found {
+		return record.Platform, nil
+	}
+	return platformAWS, nil
+}
+
+// destroyAWSHostedCluster destroys an AWS hosted cluster with the hypershift
+// CLI.
+func destroyAWSHostedCluster(ctx context.Context, p progress, cmd *cli.Command, deps Deps, dirs xdg.Dirs, mgmt, hosted string) error {
+	cfg, err := loadConfig(dirs.Config)
+	if err != nil {
+		return err
+	}
+	hypershiftPath, err := resolveHypershift(ctx, cmd, deps, dirs, cfg)
+	if err != nil {
+		return err
+	}
+	hs := hypershift.CLI{
+		Path:       hypershiftPath,
+		Kubeconfig: mgmtKubeconfigPath(dirs, mgmt),
+		Output:     p.tool("hypershift"),
+	}
+	return destroyHostedCluster(ctx, p, cmd.Bool("yes"), deps, hs, dirs, mgmt, hosted)
 }
 
 // destroyTargets describes the clusters destroyed for the given scope.

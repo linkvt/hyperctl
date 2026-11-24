@@ -84,6 +84,9 @@ case "$*" in
     done
     exit 0 ;;
   *"delete pod"*) exit 0 ;;
+  *"apply --server-side"*) exit 0 ;;
+  *"delete hostedcluster"*) exit 0 ;;
+  *"wait --for=delete"*) exit 0 ;;
 esac
 for a in "$@"; do
   case "$a" in --to=*) to="${a#--to=}" ;; esac
@@ -153,6 +156,7 @@ type testEnv struct {
 	logDir        string
 	pullSecret    string
 	aws           *fakeAWS
+	azure         *fakeAzure
 	defaultRegion string
 	releasesURL   string
 }
@@ -165,6 +169,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		logDir:     filepath.Join(root, "log"),
 		pullSecret: filepath.Join(root, "pull-secret.json"),
 		aws:        &fakeAWS{callerARN: testIAMUserARN, publicBuckets: map[string]string{}, dns: map[string][]string{}},
+		azure:      newFakeAzure(),
 	}
 	binDir := filepath.Join(root, "bin")
 	e.binDir = binDir
@@ -219,6 +224,7 @@ func (e *testEnv) runErr(t *testing.T, args ...string) (string, error) {
 	var out bytes.Buffer
 	cmd := app.New(app.Deps{
 		AWS:           e.aws,
+		Azure:         e.azure,
 		DefaultRegion: e.defaultRegion,
 		ReleasesURL:   e.releasesURL,
 		Stdout:        &out,

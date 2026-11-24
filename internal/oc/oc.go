@@ -77,6 +77,26 @@ func DeletePods(ctx context.Context, kubeconfig, namespace, selector string) err
 	return nil
 }
 
+// ApplyServerSide applies the manifests at a URL with server-side apply.
+func ApplyServerSide(ctx context.Context, kubeconfig, url string) error {
+	if _, err := run(ctx, kubeconfig, "apply", "--server-side", "-f", url); err != nil {
+		return fmt.Errorf("applying %s: %w", url, err)
+	}
+	return nil
+}
+
+// DeleteHostedCluster deletes a HostedCluster in the clusters namespace and
+// waits until its control plane namespace is gone.
+func DeleteHostedCluster(ctx context.Context, kubeconfig, name, controlPlaneNamespace string) error {
+	if _, err := run(ctx, kubeconfig, "delete", "hostedcluster", name, "-n", "clusters", "--ignore-not-found", "--timeout=30m"); err != nil {
+		return fmt.Errorf("deleting hosted cluster %s: %w", name, err)
+	}
+	if _, err := run(ctx, kubeconfig, "wait", "--for=delete", "namespace/"+controlPlaneNamespace, "--timeout=15m"); err != nil {
+		return fmt.Errorf("waiting for namespace %s to be deleted: %w", controlPlaneNamespace, err)
+	}
+	return nil
+}
+
 // run runs oc against the cluster of kubeconfig and returns its output,
 // with stderr in the error.
 func run(ctx context.Context, kubeconfig string, args ...string) ([]byte, error) {
