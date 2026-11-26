@@ -67,15 +67,6 @@ func TestCLICommands(t *testing.T) {
 			},
 			want: [][]string{{"apply", "--server-side", "-f", "https://example.com/crd.yaml"}},
 		},
-		"delete hosted cluster": {
-			run: func(ctx context.Context, c CLI) error {
-				return c.DeleteHostedCluster(ctx, testKubeconfig, "workload", "clusters-workload")
-			},
-			want: [][]string{
-				{"delete", "hostedcluster", "workload", "-n", "clusters", "--ignore-not-found", "--timeout=30m"},
-				{"wait", "--for=delete", "namespace/clusters-workload", "--timeout=15m"},
-			},
-		},
 		"hosted kubeconfig": {
 			results: []processtest.Result{
 				{Stdout: `{"status":{"kubeconfig":{"name":"workload-admin-kubeconfig"}}}`},
@@ -171,46 +162,6 @@ func TestCLIAnnotations(t *testing.T) {
 
 	if want := map[string]string{"example.com/image": "quay.io/test:dev"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
-	}
-}
-
-func TestCLIDeleteHostedCluster(t *testing.T) {
-	waitFailed := processtest.Result{Stderr: "error: no matching resources found", Err: errors.New("exit status 1")}
-	tests := map[string]struct {
-		results             []processtest.Result
-		wantNamespaceLookup bool
-		wantError           string
-	}{
-		"namespace deleted": {},
-		"namespace already gone": {
-			results:             []processtest.Result{{}, waitFailed, {}},
-			wantNamespaceLookup: true,
-		},
-		"namespace remains": {
-			results:             []processtest.Result{{}, waitFailed, {Stdout: "namespace/clusters-workload\n"}},
-			wantNamespaceLookup: true,
-			wantError:           "waiting for namespace clusters-workload to be deleted: exit status 1: error: no matching resources found",
-		},
-		"deleting fails": {
-			results:   []processtest.Result{{Stderr: "Forbidden", Err: errors.New("exit status 1")}},
-			wantError: "deleting hosted cluster workload: exit status 1: Forbidden",
-		},
-	}
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			recorder := &processtest.Recorder{Results: tc.results}
-			cli := CLI{runner: recorder}
-
-			err := cli.DeleteHostedCluster(context.Background(), testKubeconfig, "workload", "clusters-workload")
-
-			checkError(t, err, tc.wantError)
-			if tc.wantNamespaceLookup {
-				want := []string{"--kubeconfig", testKubeconfig, "get", "namespace", "clusters-workload", "--ignore-not-found", "-o", "name"}
-				if len(recorder.Calls) != 3 || !reflect.DeepEqual(recorder.Calls[2].Args, want) {
-					t.Errorf("expected a namespace lookup %q, got %q", want, recorder.Calls)
-				}
-			}
-		})
 	}
 }
 

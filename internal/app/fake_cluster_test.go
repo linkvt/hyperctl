@@ -11,9 +11,6 @@ type fakeCluster struct {
 	apiDown bool
 	// hostedKubeconfigErr fails looking up the kubeconfig of hosted clusters.
 	hostedKubeconfigErr error
-	// deleteHostedClusterErr fails deleting hosted clusters, like a control
-	// plane namespace that is not deleted.
-	deleteHostedClusterErr error
 
 	hostedClusters map[string]*fakeHostedCluster
 	annotations    map[fakeObject]map[string]string
@@ -21,7 +18,6 @@ type fakeCluster struct {
 	hostedKubeconfigLookups int
 	appliedURLs             []string
 	deletedPods             []fakePods
-	deletedHostedClusters   []hostedClusterDeletion
 }
 
 // fakeHostedCluster is a HostedCluster in the clusters namespace.
@@ -43,11 +39,6 @@ type fakeObject struct {
 type fakePods struct {
 	namespace string
 	selector  string
-}
-
-type hostedClusterDeletion struct {
-	name                  string
-	controlPlaneNamespace string
 }
 
 func newFakeCluster() *fakeCluster {
@@ -107,12 +98,6 @@ func (f *fakeCluster) DeletePods(_ context.Context, _, namespace, selector strin
 func (f *fakeCluster) ApplyServerSide(_ context.Context, _, url string) error {
 	f.appliedURLs = append(f.appliedURLs, url)
 	return nil
-}
-
-func (f *fakeCluster) DeleteHostedCluster(_ context.Context, _, name, controlPlaneNamespace string) error {
-	f.deletedHostedClusters = append(f.deletedHostedClusters, hostedClusterDeletion{name: name, controlPlaneNamespace: controlPlaneNamespace})
-	delete(f.hostedClusters, name)
-	return f.deleteHostedClusterErr
 }
 
 // availableHostedCluster is a created hosted cluster with its kubeconfig.

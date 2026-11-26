@@ -77,7 +77,7 @@ func newAzureShared(dirs xdg.Dirs, cfg config, subscription azureaccount.Subscri
 		OIDCStorageAccount:          cmp.Or(cfg.Azure.OIDCStorageAccount, defaultStorageAccount(user)),
 		DNSZone:                     cmp.Or(cfg.Azure.DNSZone, user+"-hyperctl."+baseDomain),
 		ServicePrincipal:            user + "-hyperctl",
-		CredentialsFile:             filepath.Join(dir, "credentials.json"),
+		CredentialsFile:             azureCredentialsFile(dirs),
 		ExternalDNSServicePrincipal: user + "-hyperctl-external-dns",
 		ExternalDNSCredentialsFile:  filepath.Join(dir, "external-dns-credentials.json"),
 		SigningKeyFile:              filepath.Join(dir, "serviceaccount-signer.private"),
@@ -86,6 +86,12 @@ func newAzureShared(dirs xdg.Dirs, cfg config, subscription azureaccount.Subscri
 		return azureShared{}, fmt.Errorf("DNS zone %s is not a subdomain of the base domain %s", s.DNSZone, baseDomain)
 	}
 	return s, nil
+}
+
+// azureCredentialsFile holds the credentials of the service principal the
+// hypershift CLI uses.
+func azureCredentialsFile(dirs xdg.Dirs) string {
+	return filepath.Join(azureDir(dirs), "credentials.json")
 }
 
 // defaultStorageAccount derives a storage account name from the user name,

@@ -115,19 +115,6 @@ func (a *Account) IdentityPrincipalID(ctx context.Context, resourceGroup, name s
 	return deref(identity.Properties.PrincipalID), true, nil
 }
 
-// DeleteIdentity deletes a user-assigned managed identity, which deletes its
-// federated credentials.
-func (a *Account) DeleteIdentity(ctx context.Context, resourceGroup, name string) error {
-	client, err := a.identities()
-	if err != nil {
-		return err
-	}
-	if _, err := client.Delete(ctx, resourceGroup, name, nil); err != nil && !isNotFound(err) {
-		return fmt.Errorf("deleting identity %s: %w", name, err)
-	}
-	return nil
-}
-
 func (a *Account) identities() (*armmsi.UserAssignedIdentitiesClient, error) {
 	subscriptionID, err := a.subscriptionID()
 	if err != nil {

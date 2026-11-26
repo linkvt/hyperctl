@@ -52,12 +52,13 @@ func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	root := t.TempDir()
 	cluster := newFakeCluster()
+	azure := newFakeAzure()
 	e := &testEnv{
 		home:       filepath.Join(root, "home"),
 		pullSecret: filepath.Join(root, "pull-secret.json"),
 		aws:        &fakeAWS{callerARN: testIAMUserARN, publicBuckets: map[string]string{}, dns: map[string][]string{}},
-		azure:      newFakeAzure(),
-		hypershift: newFakeHypershift(cluster),
+		azure:      azure,
+		hypershift: newFakeHypershift(cluster, azure),
 		images:     &fakeReleaseImages{},
 		cluster:    cluster,
 	}

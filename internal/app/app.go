@@ -63,8 +63,6 @@ type AzureAccount interface {
 	// IdentityPrincipalID returns the principal ID of a user-assigned managed
 	// identity and whether it exists.
 	IdentityPrincipalID(ctx context.Context, resourceGroup, name string) (string, bool, error)
-	// DeleteIdentity deletes a user-assigned managed identity.
-	DeleteIdentity(ctx context.Context, resourceGroup, name string) error
 
 	// EnsureOIDCIssuer creates a storage account with a publicly readable
 	// container of the same name unless they exist, and uploads the
@@ -102,6 +100,9 @@ type Hypershift interface {
 	CreateAzureIAM(ctx context.Context, params hypershift.CreateAzureIAMParams) error
 	CreateAzureInfra(ctx context.Context, params hypershift.CreateAzureInfraParams) error
 	CreateAzureCluster(ctx context.Context, params hypershift.CreateAzureClusterParams) error
+	DestroyAzureCluster(ctx context.Context, params hypershift.DestroyAzureParams) error
+	DestroyAzureInfra(ctx context.Context, params hypershift.DestroyAzureParams) error
+	DestroyAzureIAM(ctx context.Context, params hypershift.DestroyAzureIAMParams) error
 }
 
 // ReleaseImages are the operations on OCP release images and the
@@ -126,7 +127,6 @@ type ClusterAPI interface {
 	RemoveAnnotation(ctx context.Context, kubeconfig, kind, namespace, name, key string) error
 	DeletePods(ctx context.Context, kubeconfig, namespace, selector string) error
 	ApplyServerSide(ctx context.Context, kubeconfig, url string) error
-	DeleteHostedCluster(ctx context.Context, kubeconfig, name, controlPlaneNamespace string) error
 }
 
 // Deps are the external dependencies of the hyperctl CLI.
