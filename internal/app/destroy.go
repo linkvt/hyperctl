@@ -57,9 +57,9 @@ func runDestroy(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if err != nil {
 		return err
 	}
-	targets := clusterList{sel.cluster}
+	targets := sel.hostedClusters()
 	if !sel.cluster.isHosted() {
-		targets = append(sel.clusters.hosted(sel.cluster.mgmt), sel.cluster)
+		targets = append(targets, sel.cluster)
 	}
 	if !cmd.Bool("yes") {
 		if !deps.Interactive {

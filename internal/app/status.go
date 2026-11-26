@@ -33,10 +33,7 @@ func runStatus(ctx context.Context, cmd *cli.Command, cluster ClusterAPI, w io.W
 		return err
 	}
 	mgmt := sel.management()
-	hosted := clusterList{sel.cluster}
-	if !sel.cluster.isHosted() {
-		hosted = sel.clusters.hosted(mgmt.mgmt)
-	}
+	hosted := sel.hostedClusters()
 
 	if !mgmt.recorded {
 		// Without a record, nothing tells whether it was to get the
