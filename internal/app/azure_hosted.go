@@ -7,9 +7,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/urfave/cli/v3"
+	"sigs.k8s.io/yaml"
 
 	"github.com/linkvt/hyperctl/internal/hypershift"
 	"github.com/linkvt/hyperctl/internal/ocp"
@@ -93,7 +95,11 @@ func ensureAzureHostedCluster(ctx context.Context, p progress, account AzureAcco
 		return err
 	}
 	p.done("Created infrastructure")
-	assignments := workloadIdentityRoles(shared.Subscription.ID, opts.HostedName, record.InfraID, dnsZoneScope(shared.Subscription.ID, shared.BaseDomainResourceGroup, opts.BaseDomain))
+	groups, err := readAzureInfraGroups(infraFile, shared.Subscription.ID)
+	if err != nil {
+		return err
+	}
+	assignments := workloadIdentityRoles(opts.HostedName, record.InfraID, groups, dnsZoneScope(shared.Subscription.ID, shared.BaseDomainResourceGroup, opts.BaseDomain))
 	err = p.wait(ctx, "Assigning roles to the workload identities", func(ctx context.Context) error {
 		return assignWorkloadIdentityRoles(ctx, account, shared.ResourceGroup, assignments)
 	})
@@ -142,6 +148,57 @@ func workloadIdentitiesFile(dir string) string {
 	return filepath.Join(dir, "workload-identities.json")
 }
 
+// azureInfraGroups are the scopes of the resource groups of a hosted
+// cluster's infrastructure.
+type azureInfraGroups struct {
+	cluster string
+	nsg     string
+	vnet    string
+}
+
+// readAzureInfraGroups reads the resource groups of the infrastructure from
+// the output of hypershift create infra azure.
+func readAzureInfraGroups(file, subscriptionID string) (azureInfraGroups, error) {
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return azureInfraGroups{}, err
+	}
+	var output struct {
+		ResourceGroupName string `json:"resourceGroupName"`
+		VNetID            string `json:"vnetID"`
+		SecurityGroupID   string `json:"securityGroupID"`
+	}
+	if err := yaml.Unmarshal(data, &output); err != nil {
+		return azureInfraGroups{}, fmt.Errorf("reading %s: %w", file, err)
+	}
+	if output.ResourceGroupName == "" {
+		return azureInfraGroups{}, fmt.Errorf("reading %s: no resourceGroupName", file)
+	}
+	nsg, err := resourceGroupScope(output.SecurityGroupID)
+	if err != nil {
+		return azureInfraGroups{}, fmt.Errorf("reading %s: %w", file, err)
+	}
+	vnet, err := resourceGroupScope(output.VNetID)
+	if err != nil {
+		return azureInfraGroups{}, fmt.Errorf("reading %s: %w", file, err)
+	}
+	return azureInfraGroups{
+		cluster: "/subscriptions/" + subscriptionID + "/resourceGroups/" + output.ResourceGroupName,
+		nsg:     nsg,
+		vnet:    vnet,
+	}, nil
+}
+
+// resourceGroupScope returns the scope of the resource group of an Azure
+// resource ID.
+func resourceGroupScope(id string) (string, error) {
+	scope, _, found := strings.Cut(id, "/providers/")
+	if !found || !strings.Contains(scope, "/resourceGroups/") {
+		return "", fmt.Errorf("%q is not the ID of a resource in a resource group", id)
+	}
+	return scope, nil
+}
+
 // roleAssignment assigns a role to a workload identity.
 type roleAssignment struct {
 	identity string
@@ -154,11 +211,8 @@ type roleAssignment struct {
 // hypershift looks up the identities with Microsoft Graph, which the service
 // principal may not read. The ingress identity gets its DNS role on the base
 // domain zone instead of its whole resource group.
-func workloadIdentityRoles(subscriptionID, hosted, infraID, baseDomainZoneScope string) []roleAssignment {
-	resourceGroups := "/subscriptions/" + subscriptionID + "/resourceGroups/"
-	cluster := resourceGroups + hosted + "-" + infraID
-	nsg := resourceGroups + hosted + "-nsg-" + infraID
-	vnet := resourceGroups + hosted + "-vnet-" + infraID
+func workloadIdentityRoles(hosted, infraID string, groups azureInfraGroups, baseDomainZoneScope string) []roleAssignment {
+	cluster, nsg, vnet := groups.cluster, groups.nsg, groups.vnet
 
 	var assignments []roleAssignment
 	for _, a := range []struct {

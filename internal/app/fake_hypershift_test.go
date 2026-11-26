@@ -150,6 +150,13 @@ func (c *fakeHypershiftCLI) CreateAzureIAM(_ context.Context, params hypershift.
 
 func (c *fakeHypershiftCLI) CreateAzureInfra(_ context.Context, params hypershift.CreateAzureInfraParams) error {
 	c.fake.azureInfras = append(c.fake.azureInfras, record(c, params))
+	output := fmt.Sprintf(`resourceGroupName: %[1]s-%[2]s
+vnetID: /subscriptions/%[3]s/resourceGroups/%[1]s-vnet-%[2]s/providers/Microsoft.Network/virtualNetworks/%[1]s-%[2]s
+securityGroupID: /subscriptions/%[3]s/resourceGroups/%[1]s-nsg-%[2]s/providers/Microsoft.Network/networkSecurityGroups/%[1]s-%[2]s-nsg
+`, params.Name, params.InfraID, testSubscriptionID)
+	if err := os.WriteFile(params.OutputFile, []byte(output), 0o600); err != nil {
+		return err
+	}
 	c.print("create")
 	return nil
 }
