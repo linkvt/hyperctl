@@ -10,6 +10,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/linkvt/hyperctl/internal/azureaccount"
 	"github.com/linkvt/hyperctl/internal/hypershift"
 	"github.com/linkvt/hyperctl/internal/oc"
 	"github.com/linkvt/hyperctl/internal/ocp"
@@ -117,7 +118,7 @@ func runDestroyShared(ctx context.Context, cmd *cli.Command, deps Deps, dirs xdg
 		return err
 	}
 	p := progress{w: cmd.Root().Writer, interactive: deps.Interactive}
-	var subscription AzureSubscription
+	var subscription azureaccount.Subscription
 	err = p.wait(ctx, "Checking the Azure login", func(ctx context.Context) error {
 		var err error
 		subscription, err = deps.Azure.Subscription(ctx)

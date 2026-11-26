@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/linkvt/hyperctl/internal/azureaccount"
 	"github.com/linkvt/hyperctl/internal/xdg"
 )
 
@@ -42,7 +43,7 @@ func ensureAKSCluster(ctx context.Context, p progress, account AzureAccount, dir
 	}
 	start := time.Now()
 	err = p.wait(ctx, "Creating AKS cluster "+opts.Name+" in resource group "+resourceGroup+", this takes about 10 minutes", func(ctx context.Context) error {
-		return account.CreateAKSCluster(ctx, AKSClusterParams{
+		return account.CreateAKSCluster(ctx, azureaccount.AKSClusterParams{
 			ResourceGroup: resourceGroup,
 			Name:          opts.Name,
 			Location:      opts.Region,

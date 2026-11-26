@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/linkvt/hyperctl/internal/azureaccount"
 	"github.com/linkvt/hyperctl/internal/oidc"
 	"github.com/linkvt/hyperctl/internal/xdg"
 )
@@ -35,7 +36,7 @@ const (
 // azureShared are the Azure resources that all clusters share and that
 // hyperctl keeps when destroying clusters.
 type azureShared struct {
-	Subscription AzureSubscription
+	Subscription azureaccount.Subscription
 	// Location is where missing shared resources are created.
 	Location string
 	// ResourceGroup holds the OIDC issuer, the External DNS zone and the
@@ -61,7 +62,7 @@ type azureShared struct {
 
 // newAzureShared names the shared Azure resources after the config, with
 // defaults derived from $USER.
-func newAzureShared(dirs xdg.Dirs, cfg config, subscription AzureSubscription, baseDomain, location string) (azureShared, error) {
+func newAzureShared(dirs xdg.Dirs, cfg config, subscription azureaccount.Subscription, baseDomain, location string) (azureShared, error) {
 	user := os.Getenv("USER")
 	if user == "" {
 		return azureShared{}, errors.New("USER is not set, it names the shared Azure resources")
@@ -176,7 +177,7 @@ func ensureAzureShared(ctx context.Context, p progress, account AzureAccount, s 
 // the whole subscription.
 func ensureHypershiftServicePrincipal(ctx context.Context, p progress, account AzureAccount, s azureShared) error {
 	err := p.wait(ctx, "Checking service principal "+s.ServicePrincipal, func(ctx context.Context) error {
-		objectID, err := ensureServicePrincipal(ctx, account, s.ServicePrincipal, s.CredentialsFile, "clientId", func(sp AzureServicePrincipal) any {
+		objectID, err := ensureServicePrincipal(ctx, account, s.ServicePrincipal, s.CredentialsFile, "clientId", func(sp azureaccount.ServicePrincipal) any {
 			return servicePrincipalCredentials{
 				SubscriptionID: s.Subscription.ID,
 				TenantID:       s.Subscription.TenantID,
@@ -205,7 +206,7 @@ func ensureHypershiftServicePrincipal(ctx context.Context, p progress, account A
 // DNS, which manages the records of the External DNS zone.
 func ensureExternalDNSServicePrincipal(ctx context.Context, p progress, account AzureAccount, s azureShared) error {
 	err := p.wait(ctx, "Checking service principal "+s.ExternalDNSServicePrincipal, func(ctx context.Context) error {
-		objectID, err := ensureServicePrincipal(ctx, account, s.ExternalDNSServicePrincipal, s.ExternalDNSCredentialsFile, "aadClientId", func(sp AzureServicePrincipal) any {
+		objectID, err := ensureServicePrincipal(ctx, account, s.ExternalDNSServicePrincipal, s.ExternalDNSCredentialsFile, "aadClientId", func(sp azureaccount.ServicePrincipal) any {
 			return externalDNSCredentials{
 				TenantID:        s.Subscription.TenantID,
 				SubscriptionID:  s.Subscription.ID,
@@ -235,7 +236,7 @@ func ensureExternalDNSServicePrincipal(ctx context.Context, p progress, account 
 // the credentials file at path, whose client ID has the key appIDKey. Without
 // the file, it creates the service principal and writes the file with the
 // content of credentials.
-func ensureServicePrincipal(ctx context.Context, account AzureAccount, displayName, path, appIDKey string, credentials func(AzureServicePrincipal) any) (string, error) {
+func ensureServicePrincipal(ctx context.Context, account AzureAccount, displayName, path, appIDKey string, credentials func(azureaccount.ServicePrincipal) any) (string, error) {
 	appID, found, err := readAppID(path, appIDKey)
 	if err != nil {
 		return "", err
@@ -356,7 +357,7 @@ func destroyAzureShared(ctx context.Context, p progress, account AzureAccount, d
 	}
 	p.done("Deleted service principal %s", s.ExternalDNSServicePrincipal)
 	err = p.wait(ctx, "Deleting the delegation of "+s.DNSZone, func(ctx context.Context) error {
-		return account.DeleteDNSRecord(ctx, s.BaseDomainResourceGroup, s.BaseDomain, AzureDNSRecord{Name: s.delegationRecord(), Type: "NS"})
+		return account.DeleteDNSRecord(ctx, s.BaseDomainResourceGroup, s.BaseDomain, azureaccount.DNSRecord{Name: s.delegationRecord(), Type: "NS"})
 	})
 	if err != nil {
 		return err

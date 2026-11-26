@@ -18,18 +18,21 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
-
-	"github.com/linkvt/hyperctl/internal/app"
 )
+
+// Subscription identifies an Azure subscription.
+type Subscription struct {
+	ID       string
+	Name     string
+	TenantID string
+}
 
 // Account runs operations against the default subscription of the Azure CLI
 // login.
 type Account struct {
 	cred         azcore.TokenCredential
-	subscription func() (app.AzureSubscription, error)
+	subscription func() (Subscription, error)
 }
-
-var _ app.AzureAccount = (*Account)(nil)
 
 // New returns an Account using the Azure CLI login. It does not contact
 // Azure, so that it works without a login for AWS clusters.
@@ -42,13 +45,13 @@ func New() (*Account, error) {
 }
 
 // defaultSubscription returns the subscription the Azure CLI uses.
-func defaultSubscription() (app.AzureSubscription, error) {
+func defaultSubscription() (Subscription, error) {
 	out, err := exec.Command("az", "account", "show", "--output", "json").Output()
 	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
-		return app.AzureSubscription{}, fmt.Errorf("az account show: %w: %s, log in with: az login", err, strings.TrimSpace(string(exitErr.Stderr)))
+		return Subscription{}, fmt.Errorf("az account show: %w: %s, log in with: az login", err, strings.TrimSpace(string(exitErr.Stderr)))
 	}
 	if err != nil {
-		return app.AzureSubscription{}, fmt.Errorf("az account show: %w", err)
+		return Subscription{}, fmt.Errorf("az account show: %w", err)
 	}
 	var account struct {
 		ID       string `json:"id"`
@@ -56,13 +59,13 @@ func defaultSubscription() (app.AzureSubscription, error) {
 		TenantID string `json:"tenantId"`
 	}
 	if err := json.Unmarshal(out, &account); err != nil {
-		return app.AzureSubscription{}, fmt.Errorf("parsing az account show: %w", err)
+		return Subscription{}, fmt.Errorf("parsing az account show: %w", err)
 	}
-	return app.AzureSubscription{ID: account.ID, Name: account.Name, TenantID: account.TenantID}, nil
+	return Subscription{ID: account.ID, Name: account.Name, TenantID: account.TenantID}, nil
 }
 
 // Subscription returns the default subscription of the Azure CLI login.
-func (a *Account) Subscription(context.Context) (app.AzureSubscription, error) {
+func (a *Account) Subscription(context.Context) (Subscription, error) {
 	return a.subscription()
 }
 

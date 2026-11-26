@@ -5,6 +5,8 @@ import (
 	"io"
 
 	"github.com/urfave/cli/v3"
+
+	"github.com/linkvt/hyperctl/internal/azureaccount"
 )
 
 // AWSAccount are the AWS account operations hyperctl uses.
@@ -29,7 +31,7 @@ type AWSAccount interface {
 // of the Azure CLI login. Deleting a missing resource is not an error.
 type AzureAccount interface {
 	// Subscription returns the default subscription of the Azure CLI login.
-	Subscription(ctx context.Context) (AzureSubscription, error)
+	Subscription(ctx context.Context) (azureaccount.Subscription, error)
 	// AvailableZones returns the zones of a location that offer a VM size
 	// without restrictions. It fails if the location does not offer it.
 	AvailableZones(ctx context.Context, location, vmSize string) ([]string, error)
@@ -44,7 +46,7 @@ type AzureAccount interface {
 	// CreateServicePrincipal returns the service principal of the
 	// application with the display name, creating both if missing, and adds
 	// a new client secret to the application.
-	CreateServicePrincipal(ctx context.Context, displayName string) (AzureServicePrincipal, error)
+	CreateServicePrincipal(ctx context.Context, displayName string) (azureaccount.ServicePrincipal, error)
 	// ServicePrincipalObjectID returns the object ID of the service principal
 	// of an application and whether it exists.
 	ServicePrincipalObjectID(ctx context.Context, appID string) (string, bool, error)
@@ -73,49 +75,15 @@ type AzureAccount interface {
 	// EnsureNSRecord sets the name servers of an NS record set.
 	EnsureNSRecord(ctx context.Context, resourceGroup, zone, name string, nameServers []string) error
 	// DNSRecords lists the record sets of a zone.
-	DNSRecords(ctx context.Context, resourceGroup, zone string) ([]AzureDNSRecord, error)
+	DNSRecords(ctx context.Context, resourceGroup, zone string) ([]azureaccount.DNSRecord, error)
 	// DeleteDNSRecord deletes a record set.
-	DeleteDNSRecord(ctx context.Context, resourceGroup, zone string, record AzureDNSRecord) error
+	DeleteDNSRecord(ctx context.Context, resourceGroup, zone string, record azureaccount.DNSRecord) error
 
 	// CreateAKSCluster creates an AKS cluster and waits until it is
 	// provisioned.
-	CreateAKSCluster(ctx context.Context, params AKSClusterParams) error
+	CreateAKSCluster(ctx context.Context, params azureaccount.AKSClusterParams) error
 	// AKSAdminKubeconfig returns the admin kubeconfig of an AKS cluster.
 	AKSAdminKubeconfig(ctx context.Context, resourceGroup, name string) ([]byte, error)
-}
-
-// AzureSubscription identifies an Azure subscription.
-type AzureSubscription struct {
-	ID       string
-	Name     string
-	TenantID string
-}
-
-// AzureServicePrincipal is a service principal with a new client secret.
-type AzureServicePrincipal struct {
-	AppID        string
-	ObjectID     string
-	ClientSecret string
-}
-
-// AzureDNSRecord is a record set of an Azure DNS zone.
-type AzureDNSRecord struct {
-	// Name is relative to the zone, "@" is the apex.
-	Name string
-	// Type is the record type, e.g. "A" or "NS".
-	Type     string
-	Metadata map[string]string
-}
-
-// AKSClusterParams configure an AKS management cluster.
-type AKSClusterParams struct {
-	ResourceGroup string
-	Name          string
-	Location      string
-	VMSize        string
-	Nodes         int
-	// Zones of the nodes, empty for a location without zones.
-	Zones []string
 }
 
 // Deps are the external dependencies of the hyperctl CLI.
