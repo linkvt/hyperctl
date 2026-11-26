@@ -36,7 +36,9 @@ func runStatus(ctx context.Context, cluster ClusterAPI, w io.Writer, p progress)
 		return err
 	}
 
-	mgmt, found, err := loadClusterRecord(clusterDir(dirs, st.MgmtCluster))
+	clusters := newClusterStore(dirs)
+	mgmtRef := managementCluster(st.MgmtCluster)
+	mgmt, found, err := clusters.load(mgmtRef)
 	if err != nil {
 		return err
 	}
@@ -45,7 +47,7 @@ func runStatus(ctx context.Context, cluster ClusterAPI, w io.Writer, p progress)
 		field(w, "Phase", "not created")
 		return nil
 	}
-	kubeconfig := mgmtKubeconfigPath(dirs, st.MgmtCluster)
+	kubeconfig := clusters.kubeconfig(mgmtRef)
 	var ready bool
 	if mgmt.Phase == phaseInstalled {
 		_ = p.wait(ctx, "Checking the management cluster API", func(ctx context.Context) error {
@@ -59,7 +61,7 @@ func runStatus(ctx context.Context, cluster ClusterAPI, w io.Writer, p progress)
 	field(w, "Region", mgmt.Region)
 	switch {
 	case mgmt.Phase != phaseInstalled:
-		field(w, "Log", filepath.Join(installDir(dirs, st.MgmtCluster), ".openshift_install.log"))
+		field(w, "Log", filepath.Join(clusters.installDir(mgmtRef), ".openshift_install.log"))
 	case ready:
 		field(w, "API", "reachable")
 		field(w, "Kubeconfig", kubeconfig)
@@ -70,7 +72,8 @@ func runStatus(ctx context.Context, cluster ClusterAPI, w io.Writer, p progress)
 	if st.HostedCluster == "" {
 		return nil
 	}
-	hosted, found, err := loadClusterRecord(hostedDir(dirs, st.MgmtCluster, st.HostedCluster))
+	hostedRef := hostedCluster(st.MgmtCluster, st.HostedCluster)
+	hosted, found, err := clusters.load(hostedRef)
 	if err != nil {
 		return err
 	}
@@ -96,7 +99,7 @@ func runStatus(ctx context.Context, cluster ClusterAPI, w io.Writer, p progress)
 	printPhase(w, hosted, "hyperctl destroy hosted")
 	field(w, "Available", available)
 	if hosted.Phase == phaseInstalled {
-		field(w, "Kubeconfig", hostedKubeconfigPath(dirs, st.MgmtCluster, st.HostedCluster))
+		field(w, "Kubeconfig", clusters.kubeconfig(hostedRef))
 	}
 	printImageOverrides(w, overrides)
 	return nil

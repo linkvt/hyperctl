@@ -82,7 +82,7 @@ func runImage(ctx context.Context, cmd *cli.Command, cluster ClusterAPI, compone
 	if st.HostedCluster == "" {
 		return errors.New("no hosted cluster, run hyperctl create")
 	}
-	kubeconfig := mgmtKubeconfigPath(dirs, st.MgmtCluster)
+	kubeconfig := newClusterStore(dirs).kubeconfig(managementCluster(st.MgmtCluster))
 	namespace := component.namespace(st.HostedCluster)
 	annotations, err := cluster.Annotations(ctx, kubeconfig, component.kind, namespace, st.HostedCluster)
 	if err != nil {

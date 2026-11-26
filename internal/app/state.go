@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"sigs.k8s.io/yaml"
 )
@@ -18,49 +17,11 @@ type state struct {
 	ManagementOnly bool   `json:"managementOnly,omitempty"`
 }
 
-// clusterPhase is the lifecycle phase of a management cluster.
-type clusterPhase string
-
-const (
-	phaseInstalling clusterPhase = "Installing"
-	phaseInstalled  clusterPhase = "Installed"
-)
-
 // Platforms of the clusters.
 const (
 	platformAWS   = "aws"
 	platformAzure = "azure"
 )
-
-// clusterRecord is what hyperctl remembers about a management or hosted
-// cluster, including what is needed to destroy it.
-type clusterRecord struct {
-	Platform   string       `json:"platform"`
-	Phase      clusterPhase `json:"phase"`
-	Release    string       `json:"release"`
-	Region     string       `json:"region"`
-	BaseDomain string       `json:"baseDomain"`
-	// InfraID tags the cloud resources of a hosted cluster.
-	InfraID string `json:"infraID,omitempty"`
-	// Azure holds the Azure resources a hosted cluster depends on.
-	Azure *azureRecord `json:"azure,omitempty"`
-	// PullSecret is the pull secret path, needed to extract the installer
-	// again for destroying a management cluster.
-	PullSecret string `json:"pullSecret,omitempty"`
-	// UpdatedAt is the time of the last change, set when saving the record.
-	UpdatedAt time.Time `json:"updatedAt"`
-}
-
-// azureRecord are the shared Azure resources a hosted cluster was created
-// with, needed to destroy it even if the configuration changed since.
-type azureRecord struct {
-	// ResourceGroup holds the workload identities and the DNS zone.
-	ResourceGroup string `json:"resourceGroup"`
-	// DNSZone is the External DNS zone.
-	DNSZone string `json:"dnsZone"`
-	// BaseDomainResourceGroup holds the DNS zone of the base domain.
-	BaseDomainResourceGroup string `json:"baseDomainResourceGroup"`
-}
 
 func loadState(stateDir string) (state, error) {
 	var s state
@@ -70,18 +31,6 @@ func loadState(stateDir string) (state, error) {
 
 func saveState(stateDir string, s state) error {
 	return writeYAML(filepath.Join(stateDir, "state.yaml"), s)
-}
-
-// loadClusterRecord returns the record for a cluster and whether it exists.
-func loadClusterRecord(clusterDir string) (clusterRecord, bool, error) {
-	var r clusterRecord
-	found, err := readYAML(filepath.Join(clusterDir, "cluster.yaml"), &r)
-	return r, found, err
-}
-
-func saveClusterRecord(clusterDir string, r clusterRecord) error {
-	r.UpdatedAt = time.Now()
-	return writeYAML(filepath.Join(clusterDir, "cluster.yaml"), r)
 }
 
 // readYAML reads path into v and reports whether the file exists.

@@ -14,16 +14,13 @@ import (
 
 // ensureMgmtCluster installs the management cluster unless it is installed.
 func ensureMgmtCluster(ctx context.Context, p progress, deps Deps, dirs xdg.Dirs, opts createOptions) error {
-	record, found, err := loadClusterRecord(clusterDir(dirs, opts.Name))
+	installed, err := newClusterStore(dirs).check(managementCluster(opts.Name))
 	if err != nil {
 		return err
 	}
-	switch {
-	case found && record.Phase == phaseInstalled:
+	if installed {
 		p.done("Management cluster %s is already installed", opts.Name)
 		return nil
-	case found:
-		return fmt.Errorf("previous installation of management cluster %s did not complete, destroy it first", opts.Name)
 	}
 	return installMgmtCluster(ctx, p, deps, dirs, opts)
 }
@@ -76,27 +73,27 @@ func installMgmtCluster(ctx context.Context, p progress, deps Deps, dirs xdg.Dir
 		return err
 	}
 
-	clusterDir := clusterDir(dirs, opts.Name)
-	installDir := installDir(dirs, opts.Name)
+	clusters := newClusterStore(dirs)
+	c := managementCluster(opts.Name)
+	dir := clusters.dir(c)
+	installDir := clusters.installDir(c)
 	if err := os.MkdirAll(installDir, 0o700); err != nil {
 		return err
 	}
 	// The installer consumes install-config.yaml, keep a copy for reference.
-	for _, dir := range []string{clusterDir, installDir} {
-		if err := os.WriteFile(filepath.Join(dir, "install-config.yaml"), installConfig, 0o600); err != nil {
+	for _, d := range []string{dir, installDir} {
+		if err := os.WriteFile(filepath.Join(d, "install-config.yaml"), installConfig, 0o600); err != nil {
 			return err
 		}
 	}
 
-	record := clusterRecord{
+	if err := clusters.begin(c, clusterRecord{
 		Platform:   platformAWS,
-		Phase:      phaseInstalling,
 		Release:    opts.Release,
 		Region:     opts.Region,
 		BaseDomain: opts.BaseDomain,
 		PullSecret: opts.PullSecret,
-	}
-	if err := saveClusterRecord(clusterDir, record); err != nil {
+	}); err != nil {
 		return err
 	}
 	p.info("Installing, this takes about 45 minutes (log: %s)", filepath.Join(installDir, ".openshift_install.log"))
@@ -104,8 +101,7 @@ func installMgmtCluster(ctx context.Context, p progress, deps Deps, dirs xdg.Dir
 	if err := deps.ReleaseImages.CreateCluster(ctx, installer, installDir, release, p.tool("openshift-install")); err != nil {
 		return err
 	}
-	record.Phase = phaseInstalled
-	if err := saveClusterRecord(clusterDir, record); err != nil {
+	if err := clusters.markInstalled(c); err != nil {
 		return err
 	}
 	p.done("Installed management cluster %s (%s)", opts.Name, since(start))

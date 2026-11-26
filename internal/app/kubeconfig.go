@@ -56,10 +56,12 @@ func selectKubeconfigs(ctx context.Context, api ClusterAPI, dirs xdg.Dirs, s sta
 	if s.MgmtCluster == "" {
 		return nil, errors.New("no management cluster, run hyperctl create")
 	}
-	mgmt := kubeconfigFile{cluster: s.MgmtCluster, path: mgmtKubeconfigPath(dirs, s.MgmtCluster)}
-	hosted := kubeconfigFile{cluster: s.HostedCluster, path: hostedKubeconfigPath(dirs, s.MgmtCluster, s.HostedCluster)}
+	clusters := newClusterStore(dirs)
+	mgmt := kubeconfigFile{cluster: s.MgmtCluster, path: clusters.kubeconfig(managementCluster(s.MgmtCluster))}
+	hosted := kubeconfigFile{cluster: s.HostedCluster}
 	hostedExists := false
 	if s.HostedCluster != "" && (cluster == "" || cluster == "hosted") {
+		hosted.path = clusters.kubeconfig(hostedCluster(s.MgmtCluster, s.HostedCluster))
 		_, err := os.Stat(hosted.path)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, err

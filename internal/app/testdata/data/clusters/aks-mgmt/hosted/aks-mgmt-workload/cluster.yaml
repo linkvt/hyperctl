@@ -1,0 +1,11 @@
+azure:
+  baseDomainResourceGroup: os4-common
+  dnsZone: tester-hyperctl.azure.example.com
+  resourceGroup: tester-hyperctl
+baseDomain: azure.example.com
+infraID: aks-mgmt-workload-fghij
+phase: Installed
+platform: azure
+region: westus3
+release: 5.1.0-ec.0
+updatedAt: "2026-11-26T14:37:51.460703+01:00"
