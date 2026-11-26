@@ -141,3 +141,65 @@ func (c CLI) CreateAzureCluster(ctx context.Context, p CreateAzureClusterParams)
 	}
 	return c.run(ctx, args...)
 }
+
+// DestroyAzureParams identify an Azure hosted cluster to destroy.
+type DestroyAzureParams struct {
+	Name            string
+	InfraID         string
+	CredentialsFile string
+	Location        string
+	// DNSZoneResourceGroup holds the public DNS zone of the base domain. Only
+	// DestroyAzureCluster uses it.
+	DNSZoneResourceGroup string
+}
+
+// DestroyAzureCluster deletes an Azure hosted cluster and then its
+// infrastructure, see DestroyAzureInfra.
+func (c CLI) DestroyAzureCluster(ctx context.Context, p DestroyAzureParams) error {
+	return c.run(ctx, "destroy", "cluster", "azure",
+		"--name", p.Name,
+		"--infra-id", p.InfraID,
+		"--azure-creds", p.CredentialsFile,
+		"--location", p.Location,
+		"--dns-zone-rg-name", p.DNSZoneResourceGroup,
+	)
+}
+
+// DestroyAzureInfra deletes the resource groups of a hosted cluster by its
+// infra ID. Unlike DestroyAzureCluster, it works without the management
+// cluster.
+func (c CLI) DestroyAzureInfra(ctx context.Context, p DestroyAzureParams) error {
+	return c.run(ctx, "destroy", "infra", "azure",
+		"--name", p.Name,
+		"--infra-id", p.InfraID,
+		"--azure-creds", p.CredentialsFile,
+		"--location", p.Location,
+	)
+}
+
+// DestroyAzureIAMParams identify the workload identities of a hosted cluster.
+type DestroyAzureIAMParams struct {
+	Name            string
+	InfraID         string
+	CredentialsFile string
+	// ResourceGroup holds the identities.
+	ResourceGroup string
+	// WorkloadIdentitiesFile is the output of CreateAzureIAM. hypershift
+	// only validates it, it finds the identities by their names.
+	WorkloadIdentitiesFile string
+	// DNSZoneResourceGroup holds the public DNS zone of the base domain.
+	DNSZoneResourceGroup string
+}
+
+// DestroyAzureIAM deletes the workload identities of a hosted cluster and
+// their federated credentials.
+func (c CLI) DestroyAzureIAM(ctx context.Context, p DestroyAzureIAMParams) error {
+	return c.run(ctx, "destroy", "iam", "azure",
+		"--name", p.Name,
+		"--infra-id", p.InfraID,
+		"--azure-creds", p.CredentialsFile,
+		"--resource-group-name", p.ResourceGroup,
+		"--workload-identities-file", p.WorkloadIdentitiesFile,
+		"--dns-zone-rg-name", p.DNSZoneResourceGroup,
+	)
+}
