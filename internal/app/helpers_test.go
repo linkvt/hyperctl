@@ -50,11 +50,26 @@ mkdir -p "$d"
 echo "$*" > "$d/args"
 annotations="$HYPERCTL_TEST_LOG/annotations"
 mkdir -p "$annotations"
+# annotations set through the HostedControlPlane, which the standalone
+# karpenter-operator reads
+hcpAnnotations="$HYPERCTL_TEST_LOG/hcp-annotations"
+mkdir -p "$hcpAnnotations"
 case "$*" in
   *"adm release info"*)
     [ -z "$HYPERCTL_TEST_RELEASE_INFO_ERROR" ] || { printf '%s\n' "$HYPERCTL_TEST_RELEASE_INFO_ERROR" >&2; exit 1; }
     exit 0 ;;
   *"get --raw /readyz"*) [ -z "$HYPERCTL_TEST_API_DOWN" ] || exit 1; echo ok; exit 0 ;;
+  *"get hostedcontrolplane"*"-o json")
+    printf '{"metadata":{"annotations":{'
+    sep=""
+    for f in "$hcpAnnotations"/*; do
+      [ -e "$f" ] || continue
+      printf '%s"%s":"%s"' "$sep" "$(basename "$f" | tr '_' '/')" "$(cat "$f")"
+      sep=","
+    done
+    printf '}}'
+    printf '}'
+    exit 0 ;;
   *"get hostedcluster"*"-o json")
     if [ -n "$HYPERCTL_TEST_KUBECONFIG_ERROR" ]; then
       printf '%s\n' "$HYPERCTL_TEST_KUBECONFIG_ERROR" >&2
@@ -85,6 +100,14 @@ case "$*" in
       case "$a" in
         *=*) key="${a%%=*}"; printf '%s' "${a#*=}" > "$annotations/$(echo "$key" | tr '/' '_')" ;;
         *-) rm -f "$annotations/$(echo "${a%-}" | tr '/' '_')" ;;
+      esac
+    done
+    exit 0 ;;
+  *"annotate hostedcontrolplane"*)
+    for a in "$@"; do
+      case "$a" in
+        *=*) key="${a%%=*}"; printf '%s' "${a#*=}" > "$hcpAnnotations/$(echo "$key" | tr '/' '_')" ;;
+        *-) rm -f "$hcpAnnotations/$(echo "${a%-}" | tr '/' '_')" ;;
       esac
     done
     exit 0 ;;

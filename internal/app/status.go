@@ -81,7 +81,7 @@ func runStatus(ctx context.Context, w io.Writer, p progress) error {
 		return nil
 	}
 	available := "unknown"
-	var annotations map[string]string
+	overrides := map[string]string{}
 	if ready {
 		_ = p.wait(ctx, "Checking the hosted cluster", func(ctx context.Context) error {
 			status, err := oc.HostedClusterAvailable(ctx, kubeconfig, st.HostedCluster)
@@ -90,8 +90,7 @@ func runStatus(ctx context.Context, w io.Writer, p progress) error {
 				return nil
 			}
 			available = status
-			// Overrides are optional information, errors show in availability.
-			annotations, _ = oc.HostedClusterAnnotations(ctx, kubeconfig, st.HostedCluster)
+			overrides = imageOverrides(ctx, kubeconfig, st.HostedCluster)
 			return nil
 		})
 	}
@@ -100,15 +99,31 @@ func runStatus(ctx context.Context, w io.Writer, p progress) error {
 	if hosted.Phase == phaseInstalled {
 		field(w, "Kubeconfig", hostedKubeconfigPath(dirs, st.MgmtCluster, st.HostedCluster))
 	}
-	printImageOverrides(w, annotations)
+	printImageOverrides(w, overrides)
 	return nil
 }
 
+// imageOverrides returns the image overrides by component name. Errors are
+// ignored, overrides are optional information.
+func imageOverrides(ctx context.Context, kubeconfig, hosted string) map[string]string {
+	overrides := map[string]string{}
+	for _, component := range imageComponents {
+		annotations, err := oc.Annotations(ctx, kubeconfig, component.kind, component.namespace(hosted), hosted)
+		if err != nil {
+			continue
+		}
+		if image, set := annotations[component.annotation]; set {
+			overrides[component.name] = image
+		}
+	}
+	return overrides
+}
+
 // printImageOverrides prints the image overrides set with hyperctl image.
-func printImageOverrides(w io.Writer, annotations map[string]string) {
+func printImageOverrides(w io.Writer, overrides map[string]string) {
 	header := false
 	for _, component := range imageComponents {
-		image, set := annotations[component.annotation]
+		image, set := overrides[component.name]
 		if !set {
 			continue
 		}
