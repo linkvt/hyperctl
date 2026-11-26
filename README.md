@@ -99,7 +99,7 @@ An existing management cluster determines the platform and `create` reports it; 
 
 1. Check the Azure login (`az account show`) and that the location offers the node VM size, by default `Standard_D4s_v5`, without restrictions; the location defaults to the last used one, or `westus3`
 2. Create or reuse the resources that all clusters share, see below
-3. Create an AKS cluster with 3 nodes in 2 zones in resource group `<name>-rg` (about 10 minutes)
+3. Create an AKS cluster in 2 zones in resource group `<name>-rg` (about 10 minutes); the size prompt offers 3 nodes `Standard_D4s_v5`, as in hypershift's AKS setup script, and the size from the config file
 4. Install the Prometheus and Route CRDs and the HyperShift operator with External DNS and the standalone karpenter-operator, which Azure AutoNode requires
 5. Create the workload identities (`hypershift create iam azure --enable-karpenter`) and infrastructure (`hypershift create infra azure`), assign the roles of the workload identities, and create the hosted cluster with 2 workers
 

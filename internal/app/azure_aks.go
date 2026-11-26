@@ -3,7 +3,10 @@ package app
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
+
+	"github.com/charmbracelet/huh"
 
 	"github.com/linkvt/hyperctl/internal/azureaccount"
 )
@@ -20,6 +23,10 @@ type aksSize struct {
 	VMSize string
 	Nodes  int
 }
+
+// aksSizePresets are the sizes offered in the prompt, the first one as in
+// hypershift's contrib/managed-azure/setup_aks_cluster.sh.
+var aksSizePresets = []aksSize{{defaultAzureVMSize, defaultAKSNodes}}
 
 // ensureAKSCluster creates the AKS management cluster unless it is
 // installed, tracking progress in the cluster record.
@@ -78,6 +85,27 @@ func ensureAKSCluster(ctx context.Context, p progress, account AzureAccount, clu
 // describe describes the size for the summary.
 func (s aksSize) describe() string {
 	return fmt.Sprintf("AKS with %d nodes %s", s.Nodes, s.VMSize)
+}
+
+// promptAKSSize lets the user pick an AKS management cluster size.
+func promptAKSSize(ctx context.Context, size *aksSize) error {
+	var options []huh.Option[aksSize]
+	for _, s := range aksSizeChoices(*size) {
+		options = append(options, huh.NewOption(fmt.Sprintf("%d nodes %s", s.Nodes, s.VMSize), s))
+	}
+	return huh.NewForm(huh.NewGroup(
+		huh.NewSelect[aksSize]().Title("Management cluster size").Options(options...).Value(size),
+	)).RunWithContext(ctx)
+}
+
+// aksSizeChoices returns the presets and the current size, e.g. from the
+// config file, unless it is a preset.
+func aksSizeChoices(current aksSize) []aksSize {
+	choices := slices.Clone(aksSizePresets)
+	if !slices.Contains(choices, current) {
+		choices = append(choices, current)
+	}
+	return choices
 }
 
 // aksResourceGroup holds the AKS cluster of a management cluster.

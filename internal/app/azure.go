@@ -139,8 +139,11 @@ func (r *azureCreate) regionPrompt() (string, string) {
 	return "Azure location", "e.g. " + defaultAzureLocation + ", germanywestcentral, eastus"
 }
 
-func (r *azureCreate) promptSize(context.Context, *cli.Command) error {
-	return nil
+func (r *azureCreate) promptSize(ctx context.Context, cmd *cli.Command) error {
+	if cmd.IsSet("instance-type") || cmd.IsSet("workers") {
+		return nil
+	}
+	return promptAKSSize(ctx, &r.size)
 }
 
 func (r *azureCreate) missing() []string {

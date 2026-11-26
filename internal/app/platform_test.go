@@ -136,6 +136,30 @@ func TestAzureCreateOptions(t *testing.T) {
 	}
 }
 
+func TestAKSSizeChoices(t *testing.T) {
+	preset := aksSize{"Standard_D4s_v5", 3}
+	tests := map[string]struct {
+		current aksSize
+		want    []aksSize
+	}{
+		"preset": {
+			current: preset,
+			want:    []aksSize{preset},
+		},
+		"configured size besides the preset": {
+			current: aksSize{"Standard_D8s_v5", 2},
+			want:    []aksSize{preset, {"Standard_D8s_v5", 2}},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := aksSizeChoices(tc.current); !slices.Equal(got, tc.want) {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // parseCreateFlags returns the create command with the flags parsed from
 // args.
 func parseCreateFlags(t *testing.T, args ...string) *cli.Command {
