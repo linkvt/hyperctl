@@ -101,6 +101,11 @@ type storedCluster struct {
 	recorded bool
 }
 
+// installed reports whether creating the cluster completed.
+func (c storedCluster) installed() bool {
+	return c.recorded && c.record.Phase == phaseInstalled
+}
+
 // clusterList are the clusters in the store, each management cluster
 // followed by its hosted clusters, sorted by name.
 type clusterList []storedCluster

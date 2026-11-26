@@ -236,7 +236,7 @@ func TestCreateAzureReusesSharedResources(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)
 
-	env.run(t, "create", "--release", "5.1.0-ec.0", "--pull-secret", env.pullSecret)
+	env.run(t, "create", "--pull-secret", env.pullSecret)
 
 	if env.azure.secretsAdded != 2 {
 		t.Errorf("expected no new client secrets, got %d secrets", env.azure.secretsAdded)
@@ -439,9 +439,9 @@ func TestCreateAzureRequiresAvailableVMSize(t *testing.T) {
 func TestCreateAzureSkipsInstalledClusters(t *testing.T) {
 	env := newTestEnv(t)
 
-	for range 2 {
-		env.createAzureClusters(t)
-	}
+	env.createAzureClusters(t)
+	// The release only applies to clusters to create.
+	env.run(t, "create")
 
 	if got := len(env.azure.aksClusters); got != 1 {
 		t.Errorf("expected 1 AKS cluster creation, got %d", got)
@@ -490,7 +490,7 @@ func TestCreateRefusesOtherPlatformThanTrackedCluster(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)
 
-	_, err := env.runErr(t, "create", "--platform", "aws", "--release", "5.1.0-ec.0", "--pull-secret", env.pullSecret)
+	_, err := env.runErr(t, "create", "--platform", "aws", "--pull-secret", env.pullSecret)
 
 	if err == nil || !strings.Contains(err.Error(), "runs on azure") {
 		t.Errorf("expected a platform error, got %v", err)

@@ -80,9 +80,9 @@ func newPlatform(name string, deps Deps, dirs xdg.Dirs, clusters clusterStore) (
 	}
 }
 
-// resolvePlatform returns the platform of the tracked management cluster, or
-// the one from the flag, or asks for it if it may prompt.
-func resolvePlatform(ctx context.Context, p progress, cmd *cli.Command, deps Deps, clusters clusterStore, st state) (string, error) {
+// resolvePlatform returns the platform of an existing cluster, or the one
+// from the flag, or asks for it if it may prompt.
+func resolvePlatform(ctx context.Context, p progress, cmd *cli.Command, deps Deps, target createTarget) (string, error) {
 	platform := platformAWS
 	if cmd.IsSet("platform") {
 		platform = cmd.String("platform")
@@ -91,22 +91,13 @@ func resolvePlatform(ctx context.Context, p progress, cmd *cli.Command, deps Dep
 		}
 	}
 
-	current, found, err := currentCluster(clusters, st)
-	if err != nil {
-		return "", err
-	}
-	if found {
-		record, found, err := clusters.load(managementCluster(current.mgmt))
-		if err != nil {
-			return "", err
+	if target.mgmt.recorded {
+		record := target.mgmt.record
+		if cmd.IsSet("platform") && platform != record.Platform {
+			return "", fmt.Errorf("%s runs on %s, choose another --name for a cluster on %s", target.mgmt.clusterRef, record.Platform, platform)
 		}
-		if found {
-			if cmd.IsSet("platform") && platform != record.Platform {
-				return "", fmt.Errorf("management cluster %s runs on %s, destroy it first", current.mgmt, record.Platform)
-			}
-			p.done("Platform %s (management cluster %s)", record.Platform, current.mgmt)
-			return record.Platform, nil
-		}
+		p.done("Platform %s (%s)", record.Platform, target.mgmt.clusterRef)
+		return record.Platform, nil
 	}
 	if prompts(cmd, deps) && !cmd.IsSet("platform") {
 		return promptPlatform(ctx, platform)
