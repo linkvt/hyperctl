@@ -37,7 +37,7 @@ func ensureAKSCluster(ctx context.Context, p progress, account AzureAccount, clu
 		return err
 	}
 	if installed {
-		p.done("Management cluster %s is already installed", opts.Name)
+		p.done("%s %s is already installed", opts.Setup.clusterTitle(), opts.Name)
 		return nil
 	}
 
@@ -78,7 +78,7 @@ func ensureAKSCluster(ctx context.Context, p progress, account AzureAccount, clu
 	if err := clusters.markInstalled(c); err != nil {
 		return err
 	}
-	p.done("Installed management cluster %s (%s)", opts.Name, since(start))
+	p.done("Installed %s %s (%s)", opts.Setup.clusterNoun(), opts.Name, since(start))
 	return nil
 }
 
@@ -87,14 +87,14 @@ func (s aksSize) describe() string {
 	return fmt.Sprintf("AKS with %d nodes %s", s.Nodes, s.VMSize)
 }
 
-// promptAKSSize lets the user pick an AKS management cluster size.
-func promptAKSSize(ctx context.Context, size *aksSize) error {
+// promptAKSSize lets the user pick an AKS cluster size.
+func promptAKSSize(ctx context.Context, title string, size *aksSize) error {
 	var options []huh.Option[aksSize]
 	for _, s := range aksSizeChoices(*size) {
 		options = append(options, huh.NewOption(fmt.Sprintf("%d nodes %s", s.Nodes, s.VMSize), s))
 	}
 	return huh.NewForm(huh.NewGroup(
-		huh.NewSelect[aksSize]().Title("Management cluster size").Options(options...).Value(size),
+		huh.NewSelect[aksSize]().Title(title).Options(options...).Value(size),
 	)).RunWithContext(ctx)
 }
 

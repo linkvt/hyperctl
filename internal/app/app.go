@@ -79,7 +79,7 @@ type Deps struct {
 func New(deps Deps) *cli.Command {
 	return &cli.Command{
 		Name:      "hyperctl",
-		Usage:     "Create a HyperShift management cluster and optional AutoNode hosted cluster",
+		Usage:     "Create a cluster on AWS or Azure, optionally a HyperShift management cluster with an AutoNode hosted cluster",
 		Writer:    deps.Stdout,
 		ErrWriter: deps.Stderr,
 		// Errors are returned to the caller instead of exiting the process.

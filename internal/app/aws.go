@@ -49,8 +49,9 @@ type awsPlatform struct {
 // awsCreate is a create run on AWS.
 type awsCreate struct {
 	awsPlatform
-	st  state
-	cfg config
+	st    state
+	cfg   config
+	setup setup
 	// yes deletes DNS leftovers without confirmation.
 	yes        bool
 	oidcBucket string
@@ -61,11 +62,15 @@ type awsCreate struct {
 	oidcBucketRegion string
 }
 
-func (a awsPlatform) newCreate(cmd *cli.Command, st state, cfg config) (platformCreate, error) {
+func (a awsPlatform) newCreate(cmd *cli.Command, st state, cfg config, setup setup) (platformCreate, error) {
+	if !setup.operator() && cmd.IsSet("oidc-bucket") {
+		return nil, fmt.Errorf("--oidc-bucket does not apply to setup %s", setup)
+	}
 	run := &awsCreate{
 		awsPlatform: a,
 		st:          st,
 		cfg:         cfg,
+		setup:       setup,
 		yes:         cmd.Bool("yes"),
 		oidcBucket:  cfg.OIDCBucket,
 		size:        openshiftSize{InstanceType: cmp.Or(cfg.MgmtInstanceType, defaultSize.InstanceType), Workers: defaultSize.Workers},
@@ -92,6 +97,12 @@ func (r *awsCreate) defaultBaseDomain() string {
 	return cmp.Or(r.cfg.BaseDomain, defaultBaseDomain)
 }
 
+// needsRelease is always true, the release and pull secret install
+// OpenShift, the base domain holds its DNS records.
+func (r *awsCreate) needsRelease() bool {
+	return true
+}
+
 func (r *awsCreate) regionPrompt() (string, string) {
 	return "AWS region", ""
 }
@@ -100,7 +111,7 @@ func (r *awsCreate) promptSize(ctx context.Context, cmd *cli.Command) error {
 	if cmd.IsSet("instance-type") || cmd.IsSet("workers") {
 		return nil
 	}
-	return promptOpenShiftSize(ctx, &r.size)
+	return promptOpenShiftSize(ctx, r.setup.clusterTitle()+" size", &r.size)
 }
 
 func (r *awsCreate) missing() []string {
@@ -108,7 +119,7 @@ func (r *awsCreate) missing() []string {
 	if r.size.InstanceType == "" {
 		missing = append(missing, "--instance-type")
 	}
-	if r.oidcBucket == "" {
+	if r.setup.operator() && r.oidcBucket == "" {
 		missing = append(missing, "--oidc-bucket")
 	}
 	return missing
@@ -119,6 +130,9 @@ func (r *awsCreate) describeSize() string {
 }
 
 func (r *awsCreate) summary() []string {
+	if !r.setup.operator() {
+		return nil
+	}
 	return []string{"OIDC bucket:    " + r.oidcBucket}
 }
 
@@ -137,6 +151,9 @@ func (r *awsCreate) checkAccount(ctx context.Context, p progress) error {
 		return err
 	}
 	p.done("AWS identity %s", identity)
+	if !r.setup.operator() {
+		return nil
+	}
 	if r.credentialsFile, err = awsCredentialsFile(); err != nil {
 		return err
 	}
@@ -183,14 +200,17 @@ func awsCredentialsFile() (string, error) {
 	return path, nil
 }
 
-// prepare checks the AWS account prerequisites before anything is
-// installed, so failures surface before the long-running installation, and
-// deletes DNS leftovers of previous clusters with the same names.
+// prepare checks the AWS account prerequisites of the HyperShift operator
+// and hosted clusters before anything is installed, so failures surface
+// before the long-running installation, and deletes DNS leftovers of
+// previous clusters with the same names.
 func (r *awsCreate) prepare(ctx context.Context, p progress, opts createOptions) error {
 	p.step("Checking the AWS account")
-	var err error
-	if r.oidcBucketRegion, err = ensureAWSPrerequisites(ctx, p, r.deps.AWS, r.oidcBucket, opts.Region); err != nil {
-		return err
+	if r.setup.operator() {
+		var err error
+		if r.oidcBucketRegion, err = ensureAWSPrerequisites(ctx, p, r.deps.AWS, r.oidcBucket, opts.Region); err != nil {
+			return err
+		}
 	}
 	untracked, err := untrackedClusterNames(r.clusters, opts)
 	if err != nil {
@@ -245,7 +265,7 @@ func ensureAWSPrerequisites(ctx context.Context, p progress, account AWSAccount,
 // hyperctl has no record of. DNS entries with these names are leftovers.
 func untrackedClusterNames(clusters clusterStore, opts createOptions) ([]string, error) {
 	candidates := map[string]clusterRef{opts.Name: managementCluster(opts.Name)}
-	if !opts.ManagementOnly {
+	if opts.Setup.hosted() {
 		candidates[opts.HostedName] = hostedCluster(opts.Name, opts.HostedName)
 	}
 	var names []string

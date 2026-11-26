@@ -29,7 +29,7 @@ type openshiftSize struct {
 // defaultSize is the size openshift-install uses by default on AWS.
 var defaultSize = openshiftSize{InstanceType: "m6i.xlarge", Workers: 3}
 
-// sizePreset is a management cluster size offered in the prompt.
+// sizePreset is a cluster size offered in the prompt.
 type sizePreset struct {
 	label string
 	size  openshiftSize
@@ -51,7 +51,7 @@ func ensureMgmtCluster(ctx context.Context, p progress, deps Deps, dirs xdg.Dirs
 		return err
 	}
 	if installed {
-		p.done("Management cluster %s is already installed", opts.Name)
+		p.done("%s %s is already installed", opts.Setup.clusterTitle(), opts.Name)
 		return nil
 	}
 	return installMgmtCluster(ctx, p, deps, dirs, clusters, opts, size)
@@ -135,7 +135,7 @@ func installMgmtCluster(ctx context.Context, p progress, deps Deps, dirs xdg.Dir
 	if err := clusters.markInstalled(c); err != nil {
 		return err
 	}
-	p.done("Installed management cluster %s (%s)", opts.Name, since(start))
+	p.done("Installed %s %s (%s)", opts.Setup.clusterNoun(), opts.Name, since(start))
 	return nil
 }
 
@@ -172,9 +172,9 @@ func (s openshiftSize) describe() string {
 	return fmt.Sprintf("3 control plane + %d worker nodes %s", s.Workers, s.InstanceType)
 }
 
-// promptOpenShiftSize lets the user pick a management cluster size preset or a
+// promptOpenShiftSize lets the user pick a cluster size preset or a
 // custom instance type for a compact cluster.
-func promptOpenShiftSize(ctx context.Context, size *openshiftSize) error {
+func promptOpenShiftSize(ctx context.Context, title string, size *openshiftSize) error {
 	selected := customSize
 	var options []huh.Option[int]
 	for i, preset := range sizePresets {
@@ -185,7 +185,7 @@ func promptOpenShiftSize(ctx context.Context, size *openshiftSize) error {
 	}
 	options = append(options, huh.NewOption("Compact with a custom instance type and 1 worker in 1 zone", customSize))
 	if err := huh.NewForm(huh.NewGroup(
-		huh.NewSelect[int]().Title("Management cluster size").Options(options...).Value(&selected),
+		huh.NewSelect[int]().Title(title).Options(options...).Value(&selected),
 	)).RunWithContext(ctx); err != nil {
 		return err
 	}

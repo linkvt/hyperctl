@@ -248,6 +248,60 @@ func TestCreateAzureReusesSharedResources(t *testing.T) {
 	}
 }
 
+// TestCreateAzureSetupStandaloneSkipsHosting expects setup standalone on Azure to
+// create only the AKS cluster, without the hypershift binary, the shared
+// Azure resources, a release or a pull secret.
+func TestCreateAzureSetupStandaloneSkipsHosting(t *testing.T) {
+	env := newTestEnv(t)
+	env.hypershift.path = ""
+
+	env.run(t, "create", "--platform", "azure", "--setup", "standalone", "--region", testAzureLocation, "--name", "test-aks")
+
+	if got := len(env.azure.aksClusters); got != 1 {
+		t.Fatalf("expected the AKS cluster to be created, got %d", got)
+	}
+	if len(env.azure.applications) != 0 || len(env.azure.oidcIssuers) != 0 || len(env.azure.dnsZones) != 0 {
+		t.Errorf("expected no shared Azure resources, got applications %v, OIDC issuers %d, DNS zones %v", env.azure.applications, len(env.azure.oidcIssuers), env.azure.dnsZones)
+	}
+	if got := len(env.images.pullChecks); got != 0 {
+		t.Errorf("expected no release pull check, got %d", got)
+	}
+	if got := len(env.hypershift.azureInstalls); got != 0 {
+		t.Errorf("expected no HyperShift operator, got %d installs", got)
+	}
+}
+
+// TestCreateAzureAddsOperatorToCluster expects create with setup hosted on an
+// AKS cluster without operator to add the operator and the hosted cluster,
+// with the last used release instead of the one the cluster never had.
+func TestCreateAzureAddsOperatorToCluster(t *testing.T) {
+	env := newTestEnv(t)
+	stateDir := filepath.Join(env.home, ".local/state/hyperctl")
+	mustMkdir(t, stateDir)
+	writeFile(t, filepath.Join(stateDir, "state.yaml"), "lastRelease: 5.1.0-ec.0\n", 0o600)
+	env.run(t, "create", "--platform", "azure", "--setup", "standalone", "--region", testAzureLocation, "--name", "test-aks")
+	record := readFile(t, filepath.Join(env.home, ".local/share/hyperctl/clusters/test-aks/cluster.yaml"))
+	if !strings.Contains(record, `release: ""`) || strings.Contains(record, "pullSecret:") {
+		t.Errorf("expected the cluster without operator to record no release or pull secret, got:\n%s", record)
+	}
+
+	env.run(t, "create", "--setup", "hosted", "--pull-secret", env.pullSecret)
+
+	if got := len(env.hypershift.azureInstalls); got != 1 {
+		t.Errorf("expected the HyperShift operator to be installed, got %d installs", got)
+	}
+	if got := single(t, env.hypershift.azureClusters).params.ReleaseImage; got != "quay.io/openshift-release-dev/ocp-release:5.1.0-ec.0-x86_64" {
+		t.Errorf("expected the hosted cluster with the last used release, got %s", got)
+	}
+	if len(env.azure.applications) == 0 {
+		t.Error("expected the shared Azure resources to be created")
+	}
+	record = readFile(t, filepath.Join(env.home, ".local/share/hyperctl/clusters/test-aks/cluster.yaml"))
+	if !strings.Contains(record, "hypershiftOperator: true") {
+		t.Errorf("expected the record to note the HyperShift operator, got:\n%s", record)
+	}
+}
+
 func TestCreateAzureRemembersLocation(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)
@@ -258,7 +312,7 @@ func TestCreateAzureRemembersLocation(t *testing.T) {
 	}
 	env.run(t, "destroy", "--yes")
 
-	env.run(t, "create", "--platform", "azure", "--management-only", "--release", "5.1.0-ec.0", "--name", "second", "--pull-secret", env.pullSecret)
+	env.run(t, "create", "--platform", "azure", "--setup", "management", "--release", "5.1.0-ec.0", "--name", "second", "--pull-secret", env.pullSecret)
 
 	if got := env.azure.aksClusters[len(env.azure.aksClusters)-1].Location; got != testAzureLocation {
 		t.Errorf("location of the second cluster: got %q, want %q", got, testAzureLocation)
@@ -283,10 +337,10 @@ func TestCreateAzureConfiguredLocationWins(t *testing.T) {
 	configPath := filepath.Join(env.home, ".config", "hyperctl", "config.yaml")
 	mustMkdir(t, filepath.Dir(configPath))
 	writeFile(t, configPath, "azure:\n  location: westus3\n", 0o600)
-	env.run(t, "create", "--platform", "azure", "--management-only", "--release", "5.1.0-ec.0", "--region", testAzureLocation, "--name", "first", "--pull-secret", env.pullSecret)
+	env.run(t, "create", "--platform", "azure", "--setup", "management", "--release", "5.1.0-ec.0", "--region", testAzureLocation, "--name", "first", "--pull-secret", env.pullSecret)
 	env.run(t, "destroy", "--yes")
 
-	env.run(t, "create", "--platform", "azure", "--management-only", "--release", "5.1.0-ec.0", "--name", "second", "--pull-secret", env.pullSecret)
+	env.run(t, "create", "--platform", "azure", "--setup", "management", "--release", "5.1.0-ec.0", "--name", "second", "--pull-secret", env.pullSecret)
 
 	if got, want := env.azure.aksClusters[1].Location, "westus3"; got != want {
 		t.Errorf("location of the second cluster: got %q, want %q", got, want)

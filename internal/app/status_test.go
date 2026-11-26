@@ -2,8 +2,10 @@ package app_test
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -20,6 +22,7 @@ func TestStatus(t *testing.T) {
 				`(?m)^  Phase:\s+Installed \(since \d{4}-\d\d-\d\d \d\d:\d\d, 0s ago\)$`,
 				`(?m)^  Release:\s+5\.1\.0-ec\.0$`,
 				`(?m)^  Region:\s+eu-central-1$`,
+				`(?m)^  HyperShift:\s+installed$`,
 				`(?m)^  API:\s+reachable$`,
 				`(?m)^  Kubeconfig:\s+\S+/clusters/test-mgmt/install/auth/kubeconfig$`,
 				`(?m)^Hosted cluster test-mgmt-workload$`,
@@ -59,6 +62,73 @@ func TestStatus(t *testing.T) {
 	}
 }
 
+func TestStatusShowsClusterWithoutOperator(t *testing.T) {
+	env := newTestEnv(t)
+	env.run(t, "create", "--platform", "azure", "--setup", "standalone", "--region", testAzureLocation, "--name", "test-aks")
+
+	out := env.run(t, "status")
+
+	for _, want := range []string{
+		`(?m)^Cluster test-aks$`,
+		`(?m)^  HyperShift:\s+not installed$`,
+	} {
+		if !regexp.MustCompile(want).MatchString(out) {
+			t.Errorf("expected output to match %s, got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Release:") {
+		t.Errorf("expected no release for an AKS cluster without operator, got:\n%s", out)
+	}
+}
+
+// TestStatusShowsStandaloneClusterNotCreated expects a standalone cluster
+// whose creation failed before it was recorded to be called a cluster.
+func TestStatusShowsStandaloneClusterNotCreated(t *testing.T) {
+	env := newTestEnv(t)
+	if _, err := env.runErr(t, "create", "--setup", "standalone", "--yes",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+		"--ssh-key", filepath.Join(env.home, "missing.pub"),
+	); err == nil {
+		t.Fatal("expected create to fail without the SSH key")
+	}
+	out := env.run(t, "status")
+
+	for _, want := range []string{
+		`(?m)^Cluster test-mgmt$`,
+		`(?m)^  Phase:\s+not created$`,
+	} {
+		if !regexp.MustCompile(want).MatchString(out) {
+			t.Errorf("expected output to match %s, got:\n%s", want, out)
+		}
+	}
+}
+
+// TestStatusShowsOperatorOfEarlierVersions expects management clusters
+// recorded by earlier versions to have the HyperShift operator, as every
+// earlier create installed it.
+func TestStatusShowsOperatorOfEarlierVersions(t *testing.T) {
+	env := newTestEnv(t)
+	if err := os.CopyFS(filepath.Join(env.home, ".local/share/hyperctl"), os.DirFS(filepath.Join("testdata", "data"))); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(env.home, ".local/state/hyperctl")
+	mustMkdir(t, stateDir)
+	writeFile(t, filepath.Join(stateDir, "state.yaml"), "mgmtCluster: aws-mgmt\n", 0o600)
+
+	out := env.run(t, "status")
+
+	for _, want := range []string{
+		`(?m)^Management cluster aws-mgmt$`,
+		`(?m)^  HyperShift:\s+installed$`,
+	} {
+		if !regexp.MustCompile(want).MatchString(out) {
+			t.Errorf("expected output to match %s, got:\n%s", want, out)
+		}
+	}
+}
 func TestStatusShowsIncompleteInstallation(t *testing.T) {
 	env := newTestEnv(t)
 	env.images.installErr = errors.New("openshift-install create cluster: exit status 1")

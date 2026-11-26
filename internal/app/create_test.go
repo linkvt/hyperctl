@@ -453,12 +453,12 @@ func TestCreateEmbeddedKarpenterOperator(t *testing.T) {
 	}
 }
 
-func TestCreateManagementOnlySkipsHostedCluster(t *testing.T) {
+func TestCreateSetupManagementSkipsHostedCluster(t *testing.T) {
 	env := newTestEnv(t)
 	env.aws.dns["test-mgmt-workload"] = []string{"api.test-mgmt-workload.example.com"}
 
 	output := env.run(t, "create",
-		"--management-only",
+		"--setup", "management",
 		"--release", "5.1.0-ec.0",
 		"--region", "eu-central-1",
 		"--name", "test-mgmt",
@@ -486,20 +486,20 @@ func TestCreateManagementOnlySkipsHostedCluster(t *testing.T) {
 		t.Errorf("state: got management %q, hosted %q; want management test-mgmt and no hosted cluster", state.MgmtCluster, state.HostedCluster)
 	}
 	if !strings.Contains(output, "Done, use the cluster kubeconfig with:\n") || !strings.Contains(output, "export KUBECONFIG=$(hyperctl kubeconfig)") {
-		t.Errorf("management-only completion should use the common kubeconfig command, got:\n%s", output)
+		t.Errorf("setup management completion should use the common kubeconfig command, got:\n%s", output)
 	}
 
 	paths := strings.Split(strings.TrimSpace(env.run(t, "kubeconfig")), string(os.PathListSeparator))
 	if len(paths) != 1 || paths[0] != filepath.Join(env.home, ".local", "share", "hyperctl", "clusters", "test-mgmt", "install", "auth", "kubeconfig") {
-		t.Errorf("management-only kubeconfig paths: got %v", paths)
+		t.Errorf("setup management kubeconfig paths: got %v", paths)
 	}
 }
 
-func TestCreateRemembersManagementOnlyMode(t *testing.T) {
+func TestCreateRemembersSetup(t *testing.T) {
 	env := newTestEnv(t)
 	args := []string{
 		"create",
-		"--management-only",
+		"--setup", "management",
 		"--release", "5.1.0-ec.0",
 		"--region", "eu-central-1",
 		"--name", "test-mgmt",
@@ -516,26 +516,26 @@ func TestCreateRemembersManagementOnlyMode(t *testing.T) {
 	env.run(t, args...)
 
 	for _, call := range env.hypershift.clusters {
-		t.Errorf("remembered management-only mode created a hosted cluster: %+v", call.params)
+		t.Errorf("remembered setup management created a hosted cluster: %+v", call.params)
 	}
 
 	var state struct {
-		ManagementOnly bool `json:"managementOnly"`
+		Setup string `json:"setup"`
 	}
 	statePath := filepath.Join(env.home, ".local", "state", "hyperctl", "state.yaml")
 	if err := yaml.Unmarshal([]byte(readFile(t, statePath)), &state); err != nil {
 		t.Fatalf("parsing state: %v", err)
 	}
-	if !state.ManagementOnly {
-		t.Error("state did not remember management-only mode")
+	if state.Setup != "management" {
+		t.Errorf("state setup: got %q, want management", state.Setup)
 	}
 }
 
-func TestCreateCanOverrideRememberedManagementOnlyMode(t *testing.T) {
+func TestCreateCanOverrideRememberedSetup(t *testing.T) {
 	env := newTestEnv(t)
 	args := []string{
 		"create",
-		"--management-only",
+		"--setup", "management",
 		"--release", "5.1.0-ec.0",
 		"--region", "eu-central-1",
 		"--name", "test-mgmt",
@@ -544,7 +544,7 @@ func TestCreateCanOverrideRememberedManagementOnlyMode(t *testing.T) {
 	env.run(t, args...)
 	args = []string{
 		"create",
-		"--management-only=false",
+		"--setup", "hosted",
 		"--release", "5.1.0-ec.0",
 		"--region", "eu-central-1",
 		"--name", "test-mgmt",
@@ -553,7 +553,142 @@ func TestCreateCanOverrideRememberedManagementOnlyMode(t *testing.T) {
 	env.run(t, args...)
 
 	if hostedCreates := len(env.hypershift.clusters); hostedCreates != 1 {
-		t.Errorf("expected explicit management-only=false to create one hosted cluster, got %d", hostedCreates)
+		t.Errorf("expected explicit --setup hosted to create one hosted cluster, got %d", hostedCreates)
+	}
+}
+
+func TestCreateRejectsManagementOnlyFlag(t *testing.T) {
+	env := newTestEnv(t)
+
+	_, err := env.runErr(t, "create", "--management-only")
+
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -management-only") {
+		t.Errorf("expected --management-only to be an unknown flag, got %v", err)
+	}
+}
+
+// TestCreateSetupStandaloneSkipsHosting expects setup standalone on AWS to install
+// only the OpenShift cluster, without the hypershift binary and the account
+// prerequisites of the HyperShift operator and hosted clusters.
+func TestCreateSetupStandaloneSkipsHosting(t *testing.T) {
+	env := newTestEnv(t)
+	env.hypershift.path = ""
+	env.aws.spotRoleMissing = true
+	env.aws.dns["test-mgmt"] = []string{"api.test-mgmt.example.com"}
+	if err := os.Remove(filepath.Join(env.home, ".aws", "credentials")); err != nil {
+		t.Fatal(err)
+	}
+
+	env.run(t, "create", "--setup", "standalone", "--yes",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	)
+
+	if got := len(env.images.creates); got != 1 {
+		t.Errorf("expected openshift-install to create the cluster, got %d installations", got)
+	}
+	if got := len(env.images.pullChecks); got != 1 {
+		t.Errorf("expected the release pull check, got %d", got)
+	}
+	if got := env.aws.dns["test-mgmt"]; len(got) != 0 {
+		t.Errorf("expected the DNS leftovers of the cluster to be deleted, got %v", got)
+	}
+	if env.aws.bucketsCreated != 0 {
+		t.Errorf("expected no OIDC bucket, got %d created", env.aws.bucketsCreated)
+	}
+	if got := len(env.hypershift.installs); got != 0 {
+		t.Errorf("expected no HyperShift operator, got %d installs", got)
+	}
+	record := readFile(t, filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/cluster.yaml"))
+	if !strings.Contains(record, "hypershiftOperator: false") {
+		t.Errorf("expected the record to note no HyperShift operator, got:\n%s", record)
+	}
+}
+
+// TestCreateAddsOperatorToCluster expects create with setup hosted on a
+// cluster without operator to add the operator and the hosted cluster.
+func TestCreateAddsOperatorToCluster(t *testing.T) {
+	env := newTestEnv(t)
+	args := []string{"create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	}
+	env.run(t, append(args, "--setup", "standalone")...)
+
+	env.run(t, append(args, "--setup", "hosted")...)
+
+	if got := len(env.images.creates); got != 1 {
+		t.Errorf("expected the cluster to be installed once, got %d installations", got)
+	}
+	if got := len(env.hypershift.installs); got != 1 {
+		t.Errorf("expected the HyperShift operator to be installed, got %d installs", got)
+	}
+	if got := len(env.hypershift.clusters); got != 1 {
+		t.Errorf("expected the hosted cluster to be created, got %d", got)
+	}
+	record := readFile(t, filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/cluster.yaml"))
+	if !strings.Contains(record, "hypershiftOperator: true") {
+		t.Errorf("expected the record to note the HyperShift operator, got:\n%s", record)
+	}
+}
+
+func TestCreateRejectsFlagsOfOtherSetups(t *testing.T) {
+	tests := map[string]struct {
+		args    []string
+		wantErr string
+	}{
+		"hosted name with setup management": {
+			args:    []string{"--setup", "management", "--hosted-name", "other"},
+			wantErr: "--hosted-name does not apply to setup management",
+		},
+		"hosted name with setup standalone": {
+			args:    []string{"--setup", "standalone", "--hosted-name", "other"},
+			wantErr: "--hosted-name does not apply to setup standalone",
+		},
+		"hypershift with setup standalone": {
+			args:    []string{"--setup", "standalone", "--hypershift", testHypershiftPath},
+			wantErr: "--hypershift does not apply to setup standalone",
+		},
+		"embedded karpenter-operator with setup standalone": {
+			args:    []string{"--setup", "standalone", "--standalone-karpenter-operator=false"},
+			wantErr: "--standalone-karpenter-operator=false does not apply to setup standalone",
+		},
+		"unknown setup": {
+			args:    []string{"--setup", "hosted-cluster"},
+			wantErr: `unknown setup "hosted-cluster"`,
+		},
+		"release with setup standalone on azure": {
+			args:    []string{"--platform", "azure", "--setup", "standalone"},
+			wantErr: "--release does not apply to setup standalone on azure",
+		},
+		"OIDC bucket with setup standalone": {
+			args:    []string{"--setup", "standalone", "--oidc-bucket", "other"},
+			wantErr: "--oidc-bucket does not apply to setup standalone",
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			env := newTestEnv(t)
+			args := append([]string{"create",
+				"--release", "5.1.0-ec.0",
+				"--region", "eu-central-1",
+				"--name", "test-mgmt",
+				"--pull-secret", env.pullSecret,
+			}, tc.args...)
+
+			_, err := env.runErr(t, args...)
+
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("expected error %q, got %v", tc.wantErr, err)
+			}
+			if len(env.images.pullChecks) != 0 || len(env.images.creates) != 0 {
+				t.Errorf("expected no pull check or installation, got %d pull checks and %d installations", len(env.images.pullChecks), len(env.images.creates))
+			}
+		})
 	}
 }
 

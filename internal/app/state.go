@@ -11,10 +11,11 @@ import (
 
 // state is what hyperctl remembers between runs.
 type state struct {
-	MgmtCluster    string `json:"mgmtCluster,omitempty"`
-	HostedCluster  string `json:"hostedCluster,omitempty"`
-	LastRelease    string `json:"lastRelease,omitempty"`
-	ManagementOnly bool   `json:"managementOnly,omitempty"`
+	MgmtCluster   string `json:"mgmtCluster,omitempty"`
+	HostedCluster string `json:"hostedCluster,omitempty"`
+	LastRelease   string `json:"lastRelease,omitempty"`
+	// Setup is the last used setup.
+	Setup setup `json:"setup,omitempty"`
 	// LastRegions are the regions of the last created clusters, the default
 	// unless the config file sets one.
 	LastRegions lastRegions `json:"lastRegions,omitzero"`
