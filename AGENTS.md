@@ -21,5 +21,5 @@ Behaviour against real systems (AWS adapter, release controller, CLI flags of th
 
 ## Checks and commits
 
-- Run `make verify` before committing.
+- Run `make verify` before committing. CI runs `make verify-ci`, which fails on unformatted code instead of rewriting it and runs the tests with the race detector.
 - Conventional commits with DCO sign-off (`git commit -s`), one feature per commit.
