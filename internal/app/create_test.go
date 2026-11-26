@@ -212,6 +212,35 @@ func TestCreateDefaultsToLastUsedRelease(t *testing.T) {
 	}
 }
 
+// TestCreateWithYesDoesNotPrompt runs create in a terminal with --yes and
+// expects the defaults to be used instead of prompts.
+func TestCreateWithYesDoesNotPrompt(t *testing.T) {
+	env := newTestEnv(t)
+	env.interactive = true
+
+	env.run(t, "create", "--yes", "--release", "5.1.0-ec.0", "--region", "eu-central-1", "--pull-secret", env.pullSecret)
+
+	if len(env.images.creates) != 1 {
+		t.Fatalf("expected the management cluster to be created, got %d installations", len(env.images.creates))
+	}
+	if got := len(env.hypershift.clusters); got != 1 {
+		t.Errorf("expected the hosted cluster to be created, got %d", got)
+	}
+}
+
+// TestCreateWithYesRequiresHypershift expects --yes to fail instead of
+// asking for the path of the hypershift binary in a terminal.
+func TestCreateWithYesRequiresHypershift(t *testing.T) {
+	env := newTestEnv(t)
+	env.interactive = true
+	env.hypershift.path = ""
+
+	_, err := env.runErr(t, "create", "--yes", "--release", "5.1.0-ec.0", "--region", "eu-central-1", "--pull-secret", env.pullSecret)
+
+	if err == nil || !strings.Contains(err.Error(), "hypershift binary not found") {
+		t.Errorf("expected an error about the missing hypershift binary, got %v", err)
+	}
+}
 func TestCreateRequiresReleaseWhenNotInteractive(t *testing.T) {
 	env := newTestEnv(t)
 

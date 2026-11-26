@@ -11,7 +11,7 @@ import (
 )
 
 // resolveHypershift returns the path of a working hypershift binary: from the
-// flag, the config file or PATH. When interactive and none is found, it asks
+// flag, the config file or PATH. If none is found and it may prompt, it asks
 // for the path once and saves it to the config file.
 func resolveHypershift(ctx context.Context, cmd *cli.Command, deps Deps, dirs xdg.Dirs, cfg config) (string, error) {
 	path := flagOr(cmd, "hypershift", cfg.Hypershift)
@@ -21,7 +21,7 @@ func resolveHypershift(ctx context.Context, cmd *cli.Command, deps Deps, dirs xd
 	if path != "" {
 		return verifyHypershift(ctx, deps, path)
 	}
-	if !deps.Interactive {
+	if !prompts(cmd, deps) {
 		return "", errors.New("hypershift binary not found in PATH, build it from github.com/openshift/hypershift (make build) and pass --hypershift or set hypershift in the config file")
 	}
 

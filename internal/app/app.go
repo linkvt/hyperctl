@@ -68,8 +68,8 @@ type Deps struct {
 	DefaultRegion string
 	// ReleasesURL is the base URL of the release controller.
 	ReleasesURL string
-	// Interactive enables prompts for values not given as flags and
-	// spinners, it requires a terminal.
+	// Interactive enables prompts for values not given as flags, unless
+	// --yes is given, and spinners. It requires a terminal.
 	Interactive bool
 	Stdout      io.Writer
 	Stderr      io.Writer
@@ -94,4 +94,10 @@ func New(deps Deps) *cli.Command {
 			statusCommand(deps),
 		},
 	}
+}
+
+// prompts reports whether a command may ask for values: in a terminal,
+// unless --yes takes the defaults instead.
+func prompts(cmd *cli.Command, deps Deps) bool {
+	return deps.Interactive && !cmd.Bool("yes")
 }

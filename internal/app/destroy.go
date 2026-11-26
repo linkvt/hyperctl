@@ -22,7 +22,7 @@ func destroyCommand(deps Deps) *cli.Command {
 		Usage:     "Destroy the hosted cluster and, unless only hosted is given, the management cluster, or the shared resources of a platform",
 		ArgsUsage: "[all|hosted|shared]",
 		Flags: []cli.Flag{
-			&cli.BoolFlag{Name: "yes", Usage: "Do not ask for confirmation"},
+			&cli.BoolFlag{Name: "yes", Usage: "Do not ask anything, also not for confirmation"},
 			&cli.StringFlag{Name: "hypershift", Usage: "Path to the hypershift binary (default: from PATH)"},
 			&cli.StringFlag{Name: "platform", Usage: "Platform of the shared resources to destroy, aws or azure"},
 		},
@@ -133,13 +133,13 @@ func runDestroyShared(ctx context.Context, cmd *cli.Command, deps Deps, dirs xdg
 	return platform.destroyShared(ctx, p, cmd.Bool("yes"))
 }
 
-// sharedPlatform returns the platform from the flag or asks for it when
-// interactive.
+// sharedPlatform returns the platform from the flag or asks for it if it
+// may prompt.
 func sharedPlatform(ctx context.Context, cmd *cli.Command, deps Deps) (string, error) {
 	if cmd.IsSet("platform") {
 		return cmd.String("platform"), nil
 	}
-	if !deps.Interactive {
+	if !prompts(cmd, deps) {
 		return "", errors.New("destroying shared resources requires --platform")
 	}
 	return promptPlatform(ctx, platformAWS)
