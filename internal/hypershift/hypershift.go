@@ -2,21 +2,28 @@
 package hypershift
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/linkvt/hyperctl/internal/process"
 )
 
-// CLI runs a hypershift binary against the management cluster of Kubeconfig.
+// CLI runs a hypershift binary against a management cluster.
 type CLI struct {
-	Path       string
-	Kubeconfig string
-	// Output receives the output of hypershift.
-	Output io.Writer
+	path       string
+	kubeconfig string
+	output     io.Writer
+	runner     process.Runner
+}
+
+// New returns the hypershift binary at path running against the management
+// cluster of kubeconfig. Output receives the output of hypershift.
+func New(path, kubeconfig string, output io.Writer) CLI {
+	return CLI{path: path, kubeconfig: kubeconfig, output: output, runner: process.Exec{}}
 }
 
 // InstallParams configure the HyperShift operator installation.
@@ -120,20 +127,25 @@ func (c CLI) DestroyInfra(ctx context.Context, p DestroyClusterParams) error {
 
 // HostedKubeconfig returns an admin kubeconfig for the hosted cluster.
 func (c CLI) HostedKubeconfig(ctx context.Context, name string) ([]byte, error) {
-	cmd := c.command(ctx, "create", "kubeconfig", "--name", name)
-	cmd.Stderr = c.Output
-	out, err := cmd.Output()
-	if err != nil {
+	var out bytes.Buffer
+	if err := c.runner.Run(ctx, c.command(&out, c.output, "create", "kubeconfig", "--name", name)); err != nil {
 		return nil, fmt.Errorf("hypershift create kubeconfig: %w", err)
 	}
-	return out, nil
+	return out.Bytes(), nil
+}
+
+// Version checks that the binary runs by printing its version.
+func (c CLI) Version(ctx context.Context) error {
+	var out bytes.Buffer
+	cmd := process.Command{Path: c.path, Args: []string{"--version"}, Stdout: &out, Stderr: &out}
+	if err := c.runner.Run(ctx, cmd); err != nil {
+		return fmt.Errorf("running %s --version: %w\n%s", c.path, err, out.Bytes())
+	}
+	return nil
 }
 
 func (c CLI) run(ctx context.Context, args ...string) error {
-	cmd := c.command(ctx, args...)
-	cmd.Stdout = c.Output
-	cmd.Stderr = c.Output
-	if err := cmd.Run(); err != nil {
+	if err := c.runner.Run(ctx, c.command(c.output, c.output, args...)); err != nil {
 		return fmt.Errorf("hypershift %s: %w", strings.Join(args[:2], " "), err)
 	}
 	return nil
@@ -142,8 +154,12 @@ func (c CLI) run(ctx context.Context, args ...string) error {
 // command returns a hypershift command running against the management cluster.
 // Not all hypershift subcommands have a --kubeconfig flag, so KUBECONFIG is
 // set for all of them.
-func (c CLI) command(ctx context.Context, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, c.Path, args...)
-	cmd.Env = append(os.Environ(), "KUBECONFIG="+c.Kubeconfig)
-	return cmd
+func (c CLI) command(stdout, stderr io.Writer, args ...string) process.Command {
+	return process.Command{
+		Path:   c.path,
+		Args:   args,
+		Env:    []string{"KUBECONFIG=" + c.kubeconfig},
+		Stdout: stdout,
+		Stderr: stderr,
+	}
 }

@@ -109,12 +109,9 @@ func runCreateAzure(ctx context.Context, p progress, cmd *cli.Command, deps Deps
 	}
 
 	p.step("HyperShift operator")
-	hs := hypershift.CLI{
-		Path:       hypershiftPath,
-		Kubeconfig: mgmtKubeconfigPath(dirs, opts.Name),
-		Output:     p.tool("hypershift"),
-	}
-	if err := installAzureOperator(ctx, p, hs, opts, shared); err != nil {
+	kubeconfig := mgmtKubeconfigPath(dirs, opts.Name)
+	hs := hypershift.New(hypershiftPath, kubeconfig, p.tool("hypershift"))
+	if err := installAzureOperator(ctx, p, hs, kubeconfig, opts, shared); err != nil {
 		return err
 	}
 
@@ -136,10 +133,10 @@ func runCreateAzure(ctx context.Context, p progress, cmd *cli.Command, deps Deps
 
 // installAzureOperator installs the HyperShift operator with External DNS,
 // after adding the CRDs it expects from an OpenShift cluster.
-func installAzureOperator(ctx context.Context, p progress, hs hypershift.CLI, opts createOptions, shared azureShared) error {
+func installAzureOperator(ctx context.Context, p progress, hs hypershift.CLI, kubeconfig string, opts createOptions, shared azureShared) error {
 	err := p.wait(ctx, "Applying the Prometheus and Route CRDs", func(ctx context.Context) error {
 		for _, url := range hypershiftCRDs {
-			if err := oc.ApplyServerSide(ctx, hs.Kubeconfig, url); err != nil {
+			if err := oc.ApplyServerSide(ctx, kubeconfig, url); err != nil {
 				return err
 			}
 		}

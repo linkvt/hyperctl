@@ -173,11 +173,7 @@ func destroyAWSHostedCluster(ctx context.Context, p progress, cmd *cli.Command, 
 	if err != nil {
 		return err
 	}
-	hs := hypershift.CLI{
-		Path:       hypershiftPath,
-		Kubeconfig: mgmtKubeconfigPath(dirs, mgmt),
-		Output:     p.tool("hypershift"),
-	}
+	hs := hypershift.New(hypershiftPath, mgmtKubeconfigPath(dirs, mgmt), p.tool("hypershift"))
 	return destroyHostedCluster(ctx, p, cmd.Bool("yes"), deps, hs, dirs, mgmt, hosted)
 }
 
@@ -211,7 +207,7 @@ func destroyHostedCluster(ctx context.Context, p progress, yes bool, deps Deps, 
 	}
 	var ready bool
 	_ = p.wait(ctx, "Checking the management cluster API", func(ctx context.Context) error {
-		ready = oc.Ready(ctx, hs.Kubeconfig)
+		ready = oc.Ready(ctx, mgmtKubeconfigPath(dirs, mgmt))
 		return nil
 	})
 	start := time.Now()

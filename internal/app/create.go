@@ -152,11 +152,7 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	}
 
 	p.step("HyperShift operator")
-	hs := hypershift.CLI{
-		Path:       hypershiftPath,
-		Kubeconfig: mgmtKubeconfigPath(dirs, opts.Name),
-		Output:     p.tool("hypershift"),
-	}
+	hs := hypershift.New(hypershiftPath, mgmtKubeconfigPath(dirs, opts.Name), p.tool("hypershift"))
 	start := time.Now()
 	if err := hs.Install(ctx, hypershift.InstallParams{
 		OIDCBucket:         opts.OIDCBucket,
