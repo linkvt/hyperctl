@@ -9,7 +9,6 @@ import (
 
 	"github.com/linkvt/hyperctl/internal/azureaccount"
 	"github.com/linkvt/hyperctl/internal/hypershift"
-	"github.com/linkvt/hyperctl/internal/oc"
 	"github.com/linkvt/hyperctl/internal/ocp"
 	"github.com/linkvt/hyperctl/internal/xdg"
 )
@@ -226,7 +225,7 @@ func workloadIdentityName(hosted, component, infraID string) string {
 // cluster is reachable, and the Azure resources of the hosted cluster: its
 // DNS records, resource groups, workload identities and their role
 // assignments outside of the resource groups.
-func destroyAzureHostedCluster(ctx context.Context, p progress, account AzureAccount, dirs xdg.Dirs, mgmt, hosted string) error {
+func destroyAzureHostedCluster(ctx context.Context, p progress, account AzureAccount, cluster ClusterAPI, dirs xdg.Dirs, mgmt, hosted string) error {
 	dir := hostedDir(dirs, mgmt, hosted)
 	record, found, err := loadClusterRecord(dir)
 	if err != nil {
@@ -240,12 +239,12 @@ func destroyAzureHostedCluster(ctx context.Context, p progress, account AzureAcc
 	kubeconfig := mgmtKubeconfigPath(dirs, mgmt)
 	var ready bool
 	_ = p.wait(ctx, "Checking the management cluster API", func(ctx context.Context) error {
-		ready = oc.New().Ready(ctx, kubeconfig)
+		ready = cluster.Ready(ctx, kubeconfig)
 		return nil
 	})
 	if ready {
 		err := p.wait(ctx, "Deleting the HostedCluster, this takes about 5 minutes", func(ctx context.Context) error {
-			return oc.New().DeleteHostedCluster(ctx, kubeconfig, hosted, controlPlaneNamespace(hosted))
+			return cluster.DeleteHostedCluster(ctx, kubeconfig, hosted, controlPlaneNamespace(hosted))
 		})
 		if err != nil {
 			return err

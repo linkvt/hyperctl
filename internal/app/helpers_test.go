@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/linkvt/hyperctl/internal/app"
@@ -35,108 +34,15 @@ users:
 `
 )
 
-// fakeOC records its arguments. For status checks, the API is down when
-// HYPERCTL_TEST_API_DOWN is set and the hosted cluster's Available condition
-// is HYPERCTL_TEST_HOSTED_AVAILABLE. HostedCluster annotations are kept as
-// files in $HYPERCTL_TEST_LOG/annotations. HYPERCTL_TEST_HOSTED_KUBECONFIG_SECRET
-// names the hosted kubeconfig secret, whose content is read from the file at
-// HYPERCTL_TEST_HOSTED_KUBECONFIG. HYPERCTL_TEST_KUBECONFIG_ERROR fails lookups.
-// Waiting for a deleted namespace fails with HYPERCTL_TEST_WAIT_ERROR, and
-// HYPERCTL_TEST_NAMESPACE_GONE makes namespace lookups find nothing.
-const fakeOC = `#!/bin/sh
-d="$HYPERCTL_TEST_LOG/oc-$(ls "$HYPERCTL_TEST_LOG" | grep -c '^oc-')"
-mkdir -p "$d"
-echo "$*" > "$d/args"
-annotations="$HYPERCTL_TEST_LOG/annotations"
-mkdir -p "$annotations"
-# annotations set through the HostedControlPlane, which the standalone
-# karpenter-operator reads
-hcpAnnotations="$HYPERCTL_TEST_LOG/hcp-annotations"
-mkdir -p "$hcpAnnotations"
-case "$*" in
-  *"get --raw /readyz"*) [ -z "$HYPERCTL_TEST_API_DOWN" ] || exit 1; echo ok; exit 0 ;;
-  *"get hostedcontrolplane"*"-o json")
-    printf '{"metadata":{"annotations":{'
-    sep=""
-    for f in "$hcpAnnotations"/*; do
-      [ -e "$f" ] || continue
-      printf '%s"%s":"%s"' "$sep" "$(basename "$f" | tr '_' '/')" "$(cat "$f")"
-      sep=","
-    done
-    printf '}}'
-    printf '}'
-    exit 0 ;;
-  *"get hostedcluster"*"-o json")
-    if [ -n "$HYPERCTL_TEST_KUBECONFIG_ERROR" ]; then
-      printf '%s\n' "$HYPERCTL_TEST_KUBECONFIG_ERROR" >&2
-      exit 1
-    fi
-    printf '{"metadata":{"annotations":{'
-    sep=""
-    for f in "$annotations"/*; do
-      [ -e "$f" ] || continue
-      printf '%s"%s":"%s"' "$sep" "$(basename "$f" | tr '_' '/')" "$(cat "$f")"
-      sep=","
-    done
-    printf '}}'
-    if [ -n "$HYPERCTL_TEST_HOSTED_KUBECONFIG_SECRET" ]; then
-      printf ',"status":{"kubeconfig":{"name":"%s"}}' "$HYPERCTL_TEST_HOSTED_KUBECONFIG_SECRET"
-    fi
-    printf '}'
-    exit 0 ;;
-  *"get secret "*)
-    [ -n "$HYPERCTL_TEST_HOSTED_KUBECONFIG" ] || exit 0
-    printf '{"data":{"kubeconfig":"'
-    base64 < "$HYPERCTL_TEST_HOSTED_KUBECONFIG" | tr -d '\n'
-    printf '"}}'
-    exit 0 ;;
-  *"get hostedcluster"*) printf '%s' "$HYPERCTL_TEST_HOSTED_AVAILABLE"; exit 0 ;;
-  *"annotate hostedcluster"*)
-    for a in "$@"; do
-      case "$a" in
-        *=*) key="${a%%=*}"; printf '%s' "${a#*=}" > "$annotations/$(echo "$key" | tr '/' '_')" ;;
-        *-) rm -f "$annotations/$(echo "${a%-}" | tr '/' '_')" ;;
-      esac
-    done
-    exit 0 ;;
-  *"annotate hostedcontrolplane"*)
-    for a in "$@"; do
-      case "$a" in
-        *=*) key="${a%%=*}"; printf '%s' "${a#*=}" > "$hcpAnnotations/$(echo "$key" | tr '/' '_')" ;;
-        *-) rm -f "$hcpAnnotations/$(echo "${a%-}" | tr '/' '_')" ;;
-      esac
-    done
-    exit 0 ;;
-  *"delete pod"*) exit 0 ;;
-  *"apply --server-side"*) exit 0 ;;
-  *"delete hostedcluster"*) exit 0 ;;
-  *"wait --for=delete"*)
-    if [ -n "$HYPERCTL_TEST_WAIT_ERROR" ]; then
-      printf '%s\n' "$HYPERCTL_TEST_WAIT_ERROR" >&2
-      exit 1
-    fi
-    exit 0 ;;
-  *"get namespace "*)
-    if [ -n "$HYPERCTL_TEST_NAMESPACE_GONE" ]; then exit 0; fi
-    prev=""
-    for a in "$@"; do
-      if [ "$prev" = "namespace" ]; then printf 'namespace/%s\n' "$a"; exit 0; fi
-      prev="$a"
-    done
-    exit 0 ;;
-esac
-`
-
-// testEnv isolates a hyperctl run: temp HOME, fake binaries on PATH and a
-// fake AWS identity.
+// testEnv isolates a hyperctl run: temp HOME and XDG directories and fakes
+// of the clouds and the wrapped binaries.
 type testEnv struct {
-	binDir        string
 	home          string
-	logDir        string
 	pullSecret    string
 	aws           *fakeAWS
 	hypershift    *fakeHypershift
 	images        *fakeReleaseImages
+	cluster       *fakeCluster
 	azure         *fakeAzure
 	defaultRegion string
 	releasesURL   string
@@ -145,21 +51,16 @@ type testEnv struct {
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	root := t.TempDir()
+	cluster := newFakeCluster()
 	e := &testEnv{
 		home:       filepath.Join(root, "home"),
-		logDir:     filepath.Join(root, "log"),
 		pullSecret: filepath.Join(root, "pull-secret.json"),
 		aws:        &fakeAWS{callerARN: testIAMUserARN, publicBuckets: map[string]string{}, dns: map[string][]string{}},
 		azure:      newFakeAzure(),
-		hypershift: newFakeHypershift(),
+		hypershift: newFakeHypershift(cluster),
 		images:     &fakeReleaseImages{},
+		cluster:    cluster,
 	}
-	binDir := filepath.Join(root, "bin")
-	e.binDir = binDir
-	for _, dir := range []string{e.home, e.logDir, binDir} {
-		mustMkdir(t, dir)
-	}
-	writeFile(t, filepath.Join(binDir, "oc"), fakeOC, 0o755)
 	mustMkdir(t, filepath.Join(e.home, ".aws"))
 	writeFile(t, filepath.Join(e.home, ".aws", "credentials"), "[default]\n", 0o600)
 	writeFile(t, e.pullSecret, testPullSecret, 0o600)
@@ -169,9 +70,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	for _, v := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"} {
 		t.Setenv(v, "")
 	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "")
-	t.Setenv("HYPERCTL_TEST_LOG", e.logDir)
 	return e
 }
 
@@ -194,6 +93,7 @@ func (e *testEnv) runErr(t *testing.T, args ...string) (string, error) {
 		Hypershift:    e.hypershift.cli,
 		LookPath:      e.hypershift.lookPath,
 		ReleaseImages: e.images,
+		Cluster:       e.cluster,
 		DefaultRegion: e.defaultRegion,
 		ReleasesURL:   e.releasesURL,
 		Stdout:        &out,
@@ -258,21 +158,4 @@ func (f *fakeAWS) DeleteClusterDNS(_ context.Context, _, name string) error {
 
 func (f *fakeAWS) FirstZone(_ context.Context, region string) (string, error) {
 	return region + "b", nil
-}
-
-// ocCalls returns the arguments of recorded oc invocations that contain
-// the given text.
-func (e *testEnv) ocCalls(t *testing.T, contains string) []string {
-	t.Helper()
-	dirs, err := filepath.Glob(filepath.Join(e.logDir, "oc-*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var calls []string
-	for _, dir := range dirs {
-		if args := readFile(t, filepath.Join(dir, "args")); strings.Contains(args, contains) {
-			calls = append(calls, args)
-		}
-	}
-	return calls
 }

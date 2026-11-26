@@ -15,6 +15,7 @@ import (
 	"github.com/linkvt/hyperctl/internal/awsaccount"
 	"github.com/linkvt/hyperctl/internal/azureaccount"
 	"github.com/linkvt/hyperctl/internal/hypershift"
+	"github.com/linkvt/hyperctl/internal/oc"
 	"github.com/linkvt/hyperctl/internal/ocp"
 	"github.com/linkvt/hyperctl/internal/releases"
 )
@@ -46,6 +47,7 @@ func run(ctx context.Context) error {
 		},
 		LookPath:      exec.LookPath,
 		ReleaseImages: ocp.New(),
+		Cluster:       oc.New(),
 		DefaultRegion: awsConfig.Region,
 		ReleasesURL:   releases.DefaultURL,
 		Interactive:   term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())),

@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"encoding/json"
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -131,8 +132,8 @@ func TestCreateAzureInstallsHyperShiftOperatorWithExternalDNS(t *testing.T) {
 
 	env.createAzureClusters(t)
 
-	if got := len(env.ocCalls(t, "apply --server-side -f https://")); got != 4 {
-		t.Errorf("expected 4 CRD applies, got %d", got)
+	if got := env.cluster.appliedURLs; len(got) != 4 {
+		t.Errorf("expected 4 CRD applies, got %v", got)
 	}
 	call := single(t, env.hypershift.azureInstalls)
 	want := hypershift.InstallAzureParams{
@@ -397,11 +398,9 @@ func TestDestroyAzureDestroysHostedAndManagementCluster(t *testing.T) {
 
 	env.run(t, "destroy", "--yes")
 
-	if got := env.ocCalls(t, "delete hostedcluster test-mgmt-workload -n clusters"); len(got) != 1 {
-		t.Errorf("expected the HostedCluster to be deleted, got %v", got)
-	}
-	if got := env.ocCalls(t, "wait --for=delete namespace/clusters-test-mgmt-workload"); len(got) != 1 {
-		t.Errorf("expected to wait for the control plane namespace, got %v", got)
+	want := []hostedClusterDeletion{{name: "test-mgmt-workload", controlPlaneNamespace: "clusters-test-mgmt-workload"}}
+	if got := env.cluster.deletedHostedClusters; !slices.Equal(got, want) {
+		t.Errorf("deleted HostedClusters: got %+v, want %+v", got, want)
 	}
 	var zoneRecords []string
 	for _, r := range env.azure.dnsRecords["tester-hyperctl/"+testAzureDNSZone] {
@@ -445,11 +444,11 @@ func TestDestroyAzureHostedWhenManagementClusterIsUnreachable(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)
 	infraID := env.hostedInfraID(t)
-	t.Setenv("HYPERCTL_TEST_API_DOWN", "1")
+	env.cluster.apiDown = true
 
 	env.run(t, "destroy", "hosted", "--yes")
 
-	if got := env.ocCalls(t, "delete hostedcluster"); len(got) != 0 {
+	if got := env.cluster.deletedHostedClusters; len(got) != 0 {
 		t.Errorf("expected no HostedCluster deletion, got %v", got)
 	}
 	if !slices.Contains(env.azure.deletedResourceGroups, "test-mgmt-workload-"+infraID) {
@@ -460,12 +459,10 @@ func TestDestroyAzureHostedWhenManagementClusterIsUnreachable(t *testing.T) {
 	}
 }
 
-func TestDestroyAzureHostedWhenControlPlaneNamespaceIsAlreadyGone(t *testing.T) {
+func TestDestroyAzureHostedDestroysHostedCluster(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)
 	infraID := env.hostedInfraID(t)
-	t.Setenv("HYPERCTL_TEST_WAIT_ERROR", "error: no matching resources found")
-	t.Setenv("HYPERCTL_TEST_NAMESPACE_GONE", "1")
 
 	env.run(t, "destroy", "hosted", "--yes")
 
@@ -480,7 +477,7 @@ func TestDestroyAzureHostedWhenControlPlaneNamespaceIsAlreadyGone(t *testing.T) 
 func TestDestroyAzureHostedFailsWhenControlPlaneNamespaceRemains(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)
-	t.Setenv("HYPERCTL_TEST_WAIT_ERROR", "error: no matching resources found")
+	env.cluster.deleteHostedClusterErr = errors.New("waiting for namespace clusters-test-mgmt-workload to be deleted: timed out")
 
 	_, err := env.runErr(t, "destroy", "hosted", "--yes")
 

@@ -16,8 +16,10 @@ import (
 const testHypershiftPath = "/usr/local/bin/hypershift"
 
 // fakeHypershift is an in-memory hypershift binary. It records the
-// operations it ran, with the binary and management cluster they ran with.
+// operations it ran, with the binary and management cluster they ran with,
+// and creates and destroys the hosted clusters of the fake cluster.
 type fakeHypershift struct {
+	cluster *fakeCluster
 	// path is the hypershift binary in PATH, none if empty.
 	path string
 	// binaries are the paths of working hypershift binaries.
@@ -43,8 +45,18 @@ type recorded[P any] struct {
 	params     P
 }
 
-func newFakeHypershift() *fakeHypershift {
+// fakeHypershiftCLI runs the operations of a fakeHypershift. Like the real
+// binary, they write their output to out.
+type fakeHypershiftCLI struct {
+	fake       *fakeHypershift
+	path       string
+	kubeconfig string
+	out        io.Writer
+}
+
+func newFakeHypershift(cluster *fakeCluster) *fakeHypershift {
 	return &fakeHypershift{
+		cluster:  cluster,
 		path:     testHypershiftPath,
 		binaries: []string{testHypershiftPath},
 	}
@@ -63,18 +75,9 @@ func (f *fakeHypershift) cli(path, kubeconfig string, out io.Writer) app.Hypersh
 	return &fakeHypershiftCLI{fake: f, path: path, kubeconfig: kubeconfig, out: out}
 }
 
-// fakeHypershiftCLI runs the operations of a fakeHypershift. Like the real
-// binary, they write their output to out.
-type fakeHypershiftCLI struct {
-	fake       *fakeHypershift
-	path       string
-	kubeconfig string
-	out        io.Writer
-}
-
 func (c *fakeHypershiftCLI) Version(context.Context) error {
 	if !slices.Contains(c.fake.binaries, c.path) {
-		return fmt.Errorf("running %s --version: no such file or directory", c.path)
+		return fmt.Errorf("hypershift binary %s does not run", c.path)
 	}
 	return nil
 }
@@ -97,14 +100,18 @@ func (c *fakeHypershiftCLI) InstallAzure(_ context.Context, params hypershift.In
 func (c *fakeHypershiftCLI) CreateCluster(_ context.Context, params hypershift.CreateClusterParams) error {
 	c.fake.clusters = append(c.fake.clusters, record(c, params))
 	if c.fake.createClusterErr != nil {
+		// The HostedCluster exists, but does not become available.
+		c.fake.cluster.hostedClusters[params.Name] = &fakeHostedCluster{available: "False"}
 		return c.fake.createClusterErr
 	}
+	c.fake.cluster.hostedClusters[params.Name] = availableHostedCluster()
 	c.print("create")
 	return nil
 }
 
 func (c *fakeHypershiftCLI) DestroyCluster(_ context.Context, params hypershift.DestroyClusterParams) error {
 	c.fake.destroys = append(c.fake.destroys, record(c, params))
+	delete(c.fake.cluster.hostedClusters, params.Name)
 	c.print("destroy")
 	return nil
 }
@@ -115,8 +122,12 @@ func (c *fakeHypershiftCLI) DestroyInfra(_ context.Context, params hypershift.De
 	return nil
 }
 
-func (c *fakeHypershiftCLI) HostedKubeconfig(context.Context, string) ([]byte, error) {
-	return []byte(testHostedKubeconfig), nil
+func (c *fakeHypershiftCLI) HostedKubeconfig(_ context.Context, name string) ([]byte, error) {
+	hostedCluster, found := c.fake.cluster.hostedClusters[name]
+	if !found || hostedCluster.kubeconfig == nil {
+		return nil, fmt.Errorf("hypershift create kubeconfig: no kubeconfig for hosted cluster %s", name)
+	}
+	return hostedCluster.kubeconfig, nil
 }
 
 func (c *fakeHypershiftCLI) CreateAzureIAM(_ context.Context, params hypershift.CreateAzureIAMParams) error {
@@ -133,6 +144,7 @@ func (c *fakeHypershiftCLI) CreateAzureInfra(_ context.Context, params hypershif
 
 func (c *fakeHypershiftCLI) CreateAzureCluster(_ context.Context, params hypershift.CreateAzureClusterParams) error {
 	c.fake.azureClusters = append(c.fake.azureClusters, record(c, params))
+	c.fake.cluster.hostedClusters[params.Name] = availableHostedCluster()
 	c.print("create")
 	return nil
 }

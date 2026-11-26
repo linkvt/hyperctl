@@ -52,7 +52,6 @@ type pullCheck struct {
 
 // installerCall is a run of openshift-install.
 type installerCall struct {
-	installer  ocp.Installer
 	installDir string
 	release    ocp.Release
 	// installConfig is the install-config.yaml the installer consumed.
@@ -77,7 +76,7 @@ func (f *fakeReleaseImages) ExtractInstaller(_ context.Context, cacheDir string,
 	if err := os.MkdirAll(filepath.Dir(installer.Path), 0o755); err != nil {
 		return ocp.Installer{}, err
 	}
-	if err := os.WriteFile(installer.Path, nil, 0o755); err != nil {
+	if err := os.WriteFile(installer.Path, nil, 0o600); err != nil {
 		return ocp.Installer{}, err
 	}
 	f.extractions++
@@ -95,7 +94,7 @@ func (f *fakeReleaseImages) CreateCluster(_ context.Context, installer ocp.Insta
 	if err := os.Remove(installConfigPath); err != nil {
 		return err
 	}
-	f.creates = append(f.creates, installerCall{installer: installer, installDir: installDir, release: release, installConfig: string(installConfig)})
+	f.creates = append(f.creates, installerCall{installDir: installDir, release: release, installConfig: string(installConfig)})
 	_, _ = fmt.Fprintln(out, "level=info msg=fake install")
 	if err := os.MkdirAll(filepath.Join(installDir, "auth"), 0o755); err != nil {
 		return err
@@ -110,7 +109,7 @@ func (f *fakeReleaseImages) CreateCluster(_ context.Context, installer ocp.Insta
 }
 
 func (f *fakeReleaseImages) DestroyCluster(_ context.Context, installer ocp.Installer, installDir string, _ io.Writer) error {
-	f.destroys = append(f.destroys, installerCall{installer: installer, installDir: installDir})
+	f.destroys = append(f.destroys, installerCall{installDir: installDir})
 	return nil
 }
 

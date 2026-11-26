@@ -12,7 +12,6 @@ import (
 
 	"github.com/linkvt/hyperctl/internal/azureaccount"
 	"github.com/linkvt/hyperctl/internal/hypershift"
-	"github.com/linkvt/hyperctl/internal/oc"
 	"github.com/linkvt/hyperctl/internal/ocp"
 	"github.com/linkvt/hyperctl/internal/xdg"
 )
@@ -78,7 +77,7 @@ func runDestroy(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if st.HostedCluster != "" {
 		p.step("Hosted cluster %s", st.HostedCluster)
 		if platform == platformAzure {
-			err = destroyAzureHostedCluster(ctx, p, deps.Azure, dirs, st.MgmtCluster, st.HostedCluster)
+			err = destroyAzureHostedCluster(ctx, p, deps.Azure, deps.Cluster, dirs, st.MgmtCluster, st.HostedCluster)
 		} else {
 			err = destroyAWSHostedCluster(ctx, p, cmd, deps, dirs, st.MgmtCluster, st.HostedCluster)
 		}
@@ -207,7 +206,7 @@ func destroyHostedCluster(ctx context.Context, p progress, yes bool, deps Deps, 
 	}
 	var ready bool
 	_ = p.wait(ctx, "Checking the management cluster API", func(ctx context.Context) error {
-		ready = oc.New().Ready(ctx, mgmtKubeconfigPath(dirs, mgmt))
+		ready = deps.Cluster.Ready(ctx, mgmtKubeconfigPath(dirs, mgmt))
 		return nil
 	})
 	start := time.Now()

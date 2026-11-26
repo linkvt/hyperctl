@@ -42,7 +42,7 @@ func TestDestroyHostedDestroysInfraWhenManagementClusterIsUnreachable(t *testing
 	env := newTestEnv(t)
 	env.createClusters(t)
 	infraID := env.hostedInfraID(t)
-	t.Setenv("HYPERCTL_TEST_API_DOWN", "1")
+	env.cluster.apiDown = true
 
 	env.run(t, "destroy", "hosted", "--yes")
 

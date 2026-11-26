@@ -8,7 +8,6 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/linkvt/hyperctl/internal/oc"
 	"github.com/linkvt/hyperctl/internal/xdg"
 )
 
@@ -18,12 +17,12 @@ func statusCommand(deps Deps) *cli.Command {
 		Usage: "Show the state of the management and hosted cluster",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// Progress goes to stderr, keeping stdout for the status.
-			return runStatus(ctx, cmd.Root().Writer, progress{w: cmd.Root().ErrWriter, interactive: deps.Interactive})
+			return runStatus(ctx, deps.Cluster, cmd.Root().Writer, progress{w: cmd.Root().ErrWriter, interactive: deps.Interactive})
 		},
 	}
 }
 
-func runStatus(ctx context.Context, w io.Writer, p progress) error {
+func runStatus(ctx context.Context, cluster ClusterAPI, w io.Writer, p progress) error {
 	dirs, err := xdg.Resolve("hyperctl")
 	if err != nil {
 		return err
@@ -50,7 +49,7 @@ func runStatus(ctx context.Context, w io.Writer, p progress) error {
 	var ready bool
 	if mgmt.Phase == phaseInstalled {
 		_ = p.wait(ctx, "Checking the management cluster API", func(ctx context.Context) error {
-			ready = oc.New().Ready(ctx, kubeconfig)
+			ready = cluster.Ready(ctx, kubeconfig)
 			return nil
 		})
 	}
@@ -84,13 +83,13 @@ func runStatus(ctx context.Context, w io.Writer, p progress) error {
 	overrides := map[string]string{}
 	if ready {
 		_ = p.wait(ctx, "Checking the hosted cluster", func(ctx context.Context) error {
-			status, err := oc.New().HostedClusterAvailable(ctx, kubeconfig, st.HostedCluster)
+			status, err := cluster.HostedClusterAvailable(ctx, kubeconfig, st.HostedCluster)
 			if err != nil {
 				available = "unknown (" + err.Error() + ")"
 				return nil
 			}
 			available = status
-			overrides = imageOverrides(ctx, kubeconfig, st.HostedCluster)
+			overrides = imageOverrides(ctx, cluster, kubeconfig, st.HostedCluster)
 			return nil
 		})
 	}
@@ -105,10 +104,10 @@ func runStatus(ctx context.Context, w io.Writer, p progress) error {
 
 // imageOverrides returns the image overrides by component name. Errors are
 // ignored, overrides are optional information.
-func imageOverrides(ctx context.Context, kubeconfig, hosted string) map[string]string {
+func imageOverrides(ctx context.Context, cluster ClusterAPI, kubeconfig, hosted string) map[string]string {
 	overrides := map[string]string{}
 	for _, component := range imageComponents {
-		annotations, err := oc.New().Annotations(ctx, kubeconfig, component.kind, component.namespace(hosted), hosted)
+		annotations, err := cluster.Annotations(ctx, kubeconfig, component.kind, component.namespace(hosted), hosted)
 		if err != nil {
 			continue
 		}

@@ -44,9 +44,9 @@ func TestStatus(t *testing.T) {
 			env := newTestEnv(t)
 			env.createClusters(t)
 			if tc.apiDown {
-				t.Setenv("HYPERCTL_TEST_API_DOWN", "1")
+				env.cluster.apiDown = true
 			}
-			t.Setenv("HYPERCTL_TEST_HOSTED_AVAILABLE", tc.hostedAvailable)
+			env.cluster.hostedClusters["test-mgmt-workload"].available = tc.hostedAvailable
 
 			out := env.run(t, "status")
 
