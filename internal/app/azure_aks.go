@@ -6,13 +6,24 @@ import (
 	"time"
 
 	"github.com/linkvt/hyperctl/internal/azureaccount"
-	"github.com/linkvt/hyperctl/internal/xdg"
 )
+
+const (
+	defaultAzureVMSize = "Standard_D4s_v5"
+	defaultAKSNodes    = 3
+	// aksZones is the number of zones the AKS nodes are spread across.
+	aksZones = 2
+)
+
+// aksSize is the size of an AKS management cluster.
+type aksSize struct {
+	VMSize string
+	Nodes  int
+}
 
 // ensureAKSCluster creates the AKS management cluster unless it is
 // installed, tracking progress in the cluster record.
-func ensureAKSCluster(ctx context.Context, p progress, account AzureAccount, dirs xdg.Dirs, opts createOptions, zones []string) error {
-	clusters := newClusterStore(dirs)
+func ensureAKSCluster(ctx context.Context, p progress, account AzureAccount, clusters clusterStore, opts createOptions, size aksSize, zones []string) error {
 	c := managementCluster(opts.Name)
 	installed, err := clusters.check(c)
 	if err != nil {
@@ -42,8 +53,8 @@ func ensureAKSCluster(ctx context.Context, p progress, account AzureAccount, dir
 			ResourceGroup: resourceGroup,
 			Name:          opts.Name,
 			Location:      opts.Region,
-			VMSize:        opts.InstanceType,
-			Nodes:         opts.Workers,
+			VMSize:        size.VMSize,
+			Nodes:         size.Nodes,
 			Zones:         zones,
 		})
 	})
@@ -64,6 +75,11 @@ func ensureAKSCluster(ctx context.Context, p progress, account AzureAccount, dir
 	return nil
 }
 
+// describe describes the size for the summary.
+func (s aksSize) describe() string {
+	return fmt.Sprintf("AKS with %d nodes %s", s.Nodes, s.VMSize)
+}
+
 // aksResourceGroup holds the AKS cluster of a management cluster.
 func aksResourceGroup(name string) string {
 	return name + "-rg"
@@ -71,8 +87,7 @@ func aksResourceGroup(name string) string {
 
 // destroyAKSCluster deletes the resource group of the AKS management cluster
 // and the node resource group Azure manages for it.
-func destroyAKSCluster(ctx context.Context, p progress, account AzureAccount, dirs xdg.Dirs, name string) error {
-	clusters := newClusterStore(dirs)
+func destroyAKSCluster(ctx context.Context, p progress, account AzureAccount, clusters clusterStore, name string) error {
 	c := managementCluster(name)
 	record, found, err := clusters.destroying(c)
 	if err != nil {

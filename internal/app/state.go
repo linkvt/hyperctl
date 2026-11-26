@@ -26,12 +26,6 @@ type lastRegions struct {
 	Azure string `json:"azure,omitempty"`
 }
 
-// Platforms of the clusters.
-const (
-	platformAWS   = "aws"
-	platformAzure = "azure"
-)
-
 func loadState(stateDir string) (state, error) {
 	var s state
 	_, err := readYAML(filepath.Join(stateDir, "state.yaml"), &s)

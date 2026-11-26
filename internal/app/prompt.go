@@ -16,9 +16,8 @@ import (
 )
 
 // promptCreateOptions asks for every value not given as a flag, prefilled
-// with the current value, and for the SSH key if askSSHKey is set. With
-// confirm set, it asks for confirmation of the summary.
-func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, client releases.Client, opts *createOptions, askSSHKey, confirm bool) error {
+// with the current value, and for the SSH key if askSSHKey is set.
+func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, client releases.Client, run platformCreate, opts *createOptions, askSSHKey bool) error {
 	if !cmd.IsSet("management-only") {
 		if err := huh.NewForm(huh.NewGroup(
 			huh.NewSelect[bool]().
@@ -40,12 +39,7 @@ func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, clie
 		opts.Release = release
 	}
 
-	regionTitle := "AWS region"
-	regionDescription := ""
-	if opts.Platform == platformAzure {
-		regionTitle = "Azure location"
-		regionDescription = "e.g. " + defaultAzureLocation + ", germanywestcentral, eastus"
-	}
+	regionTitle, regionDescription := run.regionPrompt()
 	var fields []huh.Field
 	for _, input := range []struct {
 		flag        string
@@ -92,51 +86,7 @@ func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, clie
 			return err
 		}
 	}
-	if opts.Platform == platformAWS && !cmd.IsSet("instance-type") && !cmd.IsSet("workers") {
-		if err := promptSize(ctx, opts); err != nil {
-			return err
-		}
-	}
-	if !confirm {
-		return nil
-	}
-	return confirmCreateOptions(ctx, *opts)
-}
-
-// customSize marks the custom instance type option of the size prompt.
-const customSize = -1
-
-// promptSize lets the user pick a management cluster size preset or a custom
-// instance type for a compact cluster.
-func promptSize(ctx context.Context, opts *createOptions) error {
-	selected := customSize
-	var options []huh.Option[int]
-	for i, preset := range sizePresets {
-		options = append(options, huh.NewOption(preset.label, i))
-		if preset.instanceType == opts.InstanceType && preset.workers == opts.Workers {
-			selected = i
-		}
-	}
-	options = append(options, huh.NewOption("Compact with a custom instance type and 1 worker in 1 zone", customSize))
-	if err := huh.NewForm(huh.NewGroup(
-		huh.NewSelect[int]().Title("Management cluster size").Options(options...).Value(&selected),
-	)).RunWithContext(ctx); err != nil {
-		return err
-	}
-
-	if selected != customSize {
-		opts.InstanceType = sizePresets[selected].instanceType
-		opts.Workers = sizePresets[selected].workers
-		return nil
-	}
-	opts.Workers = compactWorkerCount
-	return huh.NewForm(huh.NewGroup(
-		huh.NewInput().
-			Title("EC2 instance type").
-			Description("At least 4 vCPU and 16 GiB memory").
-			Value(&opts.InstanceType).
-			Validate(requireValue),
-	)).RunWithContext(ctx)
+	return run.promptSize(ctx, cmd)
 }
 
 const (
@@ -298,7 +248,7 @@ func filterBrowseTags(ctx context.Context, client releases.Client, stream string
 }
 
 // confirmCreateOptions shows a summary and fails unless the user confirms.
-func confirmCreateOptions(ctx context.Context, opts createOptions) error {
+func confirmCreateOptions(ctx context.Context, platformName string, run platformCreate, opts createOptions) error {
 	sshKey := opts.SSHKey
 	if sshKey == "" {
 		sshKey = "none"
@@ -308,7 +258,7 @@ func confirmCreateOptions(ctx context.Context, opts createOptions) error {
 		setup = "Management cluster only"
 	}
 	summary := fmt.Sprintf("Platform:       %s\nSetup:          %s\nRelease:        %s\nRegion:         %s\nBase domain:    %s\nMgmt cluster:   %s\nMgmt size:      %s",
-		opts.Platform, setup, opts.Release, opts.Region, opts.BaseDomain, opts.Name, describeSize(opts))
+		platformName, setup, opts.Release, opts.Region, opts.BaseDomain, opts.Name, run.describeSize())
 	if !opts.ManagementOnly {
 		hostedName := opts.HostedName
 		if hostedName == "" {
@@ -317,8 +267,8 @@ func confirmCreateOptions(ctx context.Context, opts createOptions) error {
 		summary += fmt.Sprintf("\nHosted cluster: %s", hostedName)
 	}
 	summary += fmt.Sprintf("\nPull secret:    %s\nSSH key:        %s", opts.PullSecret, sshKey)
-	if opts.Platform == platformAWS {
-		summary += fmt.Sprintf("\nOIDC bucket:    %s", opts.OIDCBucket)
+	if lines := run.summary(); len(lines) > 0 {
+		summary += "\n" + strings.Join(lines, "\n")
 	}
 	karpenterOperator := "embedded"
 	if opts.StandaloneKarpenterOperator {

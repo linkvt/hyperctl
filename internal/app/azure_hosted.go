@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/urfave/cli/v3"
 	"sigs.k8s.io/yaml"
 
 	"github.com/linkvt/hyperctl/internal/hypershift"
@@ -32,8 +31,7 @@ const (
 // ensureAzureHostedCluster creates the workload identities, infrastructure,
 // role assignments and the hosted cluster with AutoNode and writes its
 // kubeconfig, unless it is already created.
-func ensureAzureHostedCluster(ctx context.Context, p progress, account AzureAccount, hs Hypershift, dirs xdg.Dirs, opts createOptions, shared azureShared) error {
-	clusters := newClusterStore(dirs)
+func ensureAzureHostedCluster(ctx context.Context, p progress, account AzureAccount, hs Hypershift, clusters clusterStore, opts createOptions, shared azureShared) error {
 	c := hostedCluster(opts.Name, opts.HostedName)
 	installed, err := clusters.check(c)
 	if err != nil {
@@ -271,8 +269,7 @@ func workloadIdentityName(hosted, component, infraID string) string {
 // its infrastructure if the management cluster is unreachable, then the
 // Azure resources that only hyperctl knows about and the workload
 // identities.
-func destroyAzureHostedCluster(ctx context.Context, p progress, cmd *cli.Command, deps Deps, dirs xdg.Dirs, mgmt, hosted string) error {
-	clusters := newClusterStore(dirs)
+func destroyAzureHostedCluster(ctx context.Context, p progress, deps Deps, dirs xdg.Dirs, clusters clusterStore, hs Hypershift, mgmt, hosted string) error {
 	c := hostedCluster(mgmt, hosted)
 	record, found, err := clusters.destroying(c)
 	if err != nil {
@@ -282,16 +279,7 @@ func destroyAzureHostedCluster(ctx context.Context, p progress, cmd *cli.Command
 		p.done("Creation never started, nothing to destroy")
 		return nil
 	}
-	cfg, err := loadConfig(dirs.Config)
-	if err != nil {
-		return err
-	}
-	hypershiftPath, err := resolveHypershift(ctx, cmd, deps, dirs, cfg)
-	if err != nil {
-		return err
-	}
 	kubeconfig := clusters.kubeconfig(managementCluster(mgmt))
-	hs := deps.Hypershift(hypershiftPath, kubeconfig, p.tool("hypershift"))
 	params := hypershift.DestroyAzureParams{
 		Name:                 hosted,
 		InfraID:              record.InfraID,
