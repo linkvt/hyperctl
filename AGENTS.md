@@ -12,16 +12,24 @@ design notes and the backlog.
   interface.
 - `internal/ocp`, `internal/hypershift`, `internal/oc`: wrappers that run the
   `openshift-install`, `hypershift` and `oc` binaries.
+- `internal/process`: runner the wrappers start processes through;
+  `processtest` records them in tests.
 - `internal/releases`: release controller API client.
 - `internal/xdg`: config, data, state and cache directories.
 
 ## Testing
 
-Work test-first. Tests drive the CLI in-process (`app.New(...).Run`) with an
-isolated HOME, fake `oc`/`openshift-install`/`hypershift` shell scripts on
-PATH and an in-memory `fakeAWS`, see `internal/app/helpers_test.go`. Extend
-the fakes rather than mocking internal packages. Prompts need a TTY and are
-verified by hand.
+Work test-first. Tests drive the CLI in-process (`app.New(deps).Run`) with an
+isolated HOME and fakes of everything in `app.Deps`, see
+`internal/app/helpers_test.go` and `fake_*_test.go`. The fakes share state
+like the real systems (the fake hypershift creates hosted clusters in
+`fakeCluster`), record operations as typed values and fail through typed
+error fields; extend them for new behaviour and assert operations and their
+parameters as Go values. Command lines of the wrapped binaries are tested
+where they are built: the in-package tests of `internal/hypershift`,
+`internal/oc` and `internal/ocp` run commands through a
+`processtest.Recorder` and assert the exact argv and environment. Prompts
+need a TTY and are verified by hand.
 
 A built hyperctl acts on the user's real clusters through the default XDG
 directories. Run it only with isolated `XDG_CONFIG_HOME`, `XDG_DATA_HOME`,
