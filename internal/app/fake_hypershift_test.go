@@ -27,8 +27,8 @@ type fakeHypershift struct {
 	path string
 	// binaries are the paths of working hypershift binaries.
 	binaries []string
-	// installErr, createClusterErr and destroyAzureClusterErr fail Install,
-	// CreateCluster and DestroyAzureCluster.
+	// installErr fails Install, createClusterErr CreateCluster and
+	// CreateAzureCluster, destroyAzureClusterErr DestroyAzureCluster.
 	installErr             error
 	createClusterErr       error
 	destroyAzureClusterErr error
@@ -163,6 +163,10 @@ securityGroupID: /subscriptions/%[3]s/resourceGroups/%[1]s-nsg-%[2]s/providers/M
 
 func (c *fakeHypershiftCLI) CreateAzureCluster(_ context.Context, params hypershift.CreateAzureClusterParams) error {
 	c.fake.azureClusters = append(c.fake.azureClusters, record(c, params))
+	if c.fake.createClusterErr != nil {
+		c.fake.cluster.hostedClusters[params.Name] = &fakeHostedCluster{available: "False"}
+		return c.fake.createClusterErr
+	}
 	c.fake.cluster.hostedClusters[params.Name] = availableHostedCluster()
 	c.print("create")
 	return nil

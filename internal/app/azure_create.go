@@ -108,7 +108,7 @@ func runCreateAzure(ctx context.Context, p progress, cmd *cli.Command, deps Deps
 	}
 
 	p.step("HyperShift operator")
-	kubeconfig := mgmtKubeconfigPath(dirs, opts.Name)
+	kubeconfig := newClusterStore(dirs).kubeconfig(managementCluster(opts.Name))
 	hs := deps.Hypershift(hypershiftPath, kubeconfig, p.tool("hypershift"))
 	if err := installAzureOperator(ctx, p, deps.Cluster, hs, kubeconfig, opts, shared); err != nil {
 		return err

@@ -152,7 +152,7 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	}
 
 	p.step("HyperShift operator")
-	hs := deps.Hypershift(hypershiftPath, mgmtKubeconfigPath(dirs, opts.Name), p.tool("hypershift"))
+	hs := deps.Hypershift(hypershiftPath, newClusterStore(dirs).kubeconfig(managementCluster(opts.Name)), p.tool("hypershift"))
 	start := time.Now()
 	if err := hs.Install(ctx, hypershift.InstallParams{
 		OIDCBucket:         opts.OIDCBucket,
@@ -196,13 +196,14 @@ func requireTrackedClusters(st state, opts createOptions) error {
 // untrackedClusterNames returns the names of the clusters to create that
 // hyperctl has no record of. DNS entries with these names are leftovers.
 func untrackedClusterNames(dirs xdg.Dirs, opts createOptions) ([]string, error) {
-	var names []string
-	clusters := map[string]string{opts.Name: clusterDir(dirs, opts.Name)}
+	clusters := newClusterStore(dirs)
+	candidates := map[string]clusterRef{opts.Name: managementCluster(opts.Name)}
 	if !opts.ManagementOnly {
-		clusters[opts.HostedName] = hostedDir(dirs, opts.Name, opts.HostedName)
+		candidates[opts.HostedName] = hostedCluster(opts.Name, opts.HostedName)
 	}
-	for name, dir := range clusters {
-		_, found, err := loadClusterRecord(dir)
+	var names []string
+	for name, c := range candidates {
+		_, found, err := clusters.load(c)
 		if err != nil {
 			return nil, err
 		}
@@ -399,7 +400,7 @@ func defaultCreateOptions(deps Deps, dirs xdg.Dirs, st state, cfg config, platfo
 	// cluster.
 	opts.Name = st.MgmtCluster
 	opts.HostedName = st.HostedCluster
-	record, found, err := loadClusterRecord(clusterDir(dirs, st.MgmtCluster))
+	record, found, err := newClusterStore(dirs).load(managementCluster(st.MgmtCluster))
 	if err != nil || !found {
 		return opts, err
 	}

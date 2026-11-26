@@ -368,6 +368,56 @@ func TestCreateAzureRequiresAvailableVMSize(t *testing.T) {
 	}
 }
 
+func TestCreateAzureSkipsInstalledClusters(t *testing.T) {
+	env := newTestEnv(t)
+
+	for range 2 {
+		env.createAzureClusters(t)
+	}
+
+	if got := len(env.azure.aksClusters); got != 1 {
+		t.Errorf("expected 1 AKS cluster creation, got %d", got)
+	}
+	if got := len(env.hypershift.azureClusters); got != 1 {
+		t.Errorf("expected 1 hosted cluster creation, got %d", got)
+	}
+}
+
+func TestCreateAzureRefusesIncompleteManagementCluster(t *testing.T) {
+	env := newTestEnv(t)
+	env.azure.createAKSClusterErr = errors.New("creating AKS cluster: quota exceeded")
+	if _, err := env.runErr(t, env.azureCreateArgs()...); err == nil {
+		t.Fatal("expected failing AKS creation to fail create")
+	}
+	env.azure.createAKSClusterErr = nil
+
+	_, err := env.runErr(t, env.azureCreateArgs()...)
+
+	if err == nil || !strings.Contains(err.Error(), "previous installation of management cluster test-mgmt did not complete") {
+		t.Errorf("expected incomplete installation error, got %v", err)
+	}
+	if got := len(env.azure.aksClusters); got != 0 {
+		t.Errorf("expected no AKS cluster, got %d", got)
+	}
+}
+
+func TestCreateAzureRefusesIncompleteHostedCluster(t *testing.T) {
+	env := newTestEnv(t)
+	env.hypershift.createClusterErr = errors.New("hypershift create cluster: exit status 1")
+	if _, err := env.runErr(t, env.azureCreateArgs()...); err == nil {
+		t.Fatal("expected failing hypershift to fail create")
+	}
+	env.hypershift.createClusterErr = nil
+
+	_, err := env.runErr(t, env.azureCreateArgs()...)
+
+	if err == nil || !strings.Contains(err.Error(), "previous creation of hosted cluster test-mgmt-workload did not complete") {
+		t.Errorf("expected incomplete creation error, got %v", err)
+	}
+	if got := len(env.hypershift.azureClusters); got != 1 {
+		t.Errorf("expected 1 hosted cluster creation, got %d", got)
+	}
+}
 func TestCreateRefusesOtherPlatformThanTrackedCluster(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)
@@ -577,13 +627,18 @@ func TestDestroySharedRequiresDestroyedClusters(t *testing.T) {
 // cluster.
 func (e *testEnv) createAzureClusters(t *testing.T) {
 	t.Helper()
-	e.run(t, "create",
+	e.run(t, e.azureCreateArgs()...)
+}
+
+// azureCreateArgs create the clusters of createAzureClusters.
+func (e *testEnv) azureCreateArgs() []string {
+	return []string{"create",
 		"--platform", "azure",
 		"--release", "5.1.0-ec.0",
 		"--region", testAzureLocation,
 		"--name", "test-mgmt",
 		"--pull-secret", e.pullSecret,
-	)
+	}
 }
 
 func readJSON(t *testing.T, path string, v any) {

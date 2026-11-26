@@ -33,25 +33,22 @@ const (
 // role assignments and the hosted cluster with AutoNode and writes its
 // kubeconfig, unless it is already created.
 func ensureAzureHostedCluster(ctx context.Context, p progress, account AzureAccount, hs Hypershift, dirs xdg.Dirs, opts createOptions, shared azureShared) error {
-	dir := hostedDir(dirs, opts.Name, opts.HostedName)
-	record, found, err := loadClusterRecord(dir)
+	clusters := newClusterStore(dirs)
+	c := hostedCluster(opts.Name, opts.HostedName)
+	installed, err := clusters.check(c)
 	if err != nil {
 		return err
 	}
-	switch {
-	case found && record.Phase == phaseInstalled:
+	if installed {
 		p.done("Hosted cluster %s is already created", opts.HostedName)
 		return nil
-	case found:
-		return fmt.Errorf("previous creation of hosted cluster %s did not complete, destroy it first", opts.HostedName)
 	}
 
 	// The infra ID and shared resources are recorded before creating
 	// anything, so that the Azure resources can be destroyed even if
 	// creating did not complete.
-	record = clusterRecord{
+	record := clusterRecord{
 		Platform:   platformAzure,
-		Phase:      phaseInstalling,
 		Release:    opts.Release,
 		Region:     opts.Region,
 		BaseDomain: opts.BaseDomain,
@@ -62,9 +59,10 @@ func ensureAzureHostedCluster(ctx context.Context, p progress, account AzureAcco
 			BaseDomainResourceGroup: shared.BaseDomainResourceGroup,
 		},
 	}
-	if err := saveClusterRecord(dir, record); err != nil {
+	if err := clusters.begin(c, record); err != nil {
 		return err
 	}
+	dir := clusters.dir(c)
 	identitiesFile := workloadIdentitiesFile(dir)
 	infraFile := filepath.Join(dir, "infra-output.yaml")
 
@@ -133,13 +131,12 @@ func ensureAzureHostedCluster(ctx context.Context, p progress, account AzureAcco
 	if err != nil {
 		return err
 	}
-	kubeconfigPath := hostedKubeconfigPath(dirs, opts.Name, opts.HostedName)
+	kubeconfigPath := clusters.kubeconfig(c)
 	if err := writeFile(kubeconfigPath, kubeconfig); err != nil {
 		return err
 	}
 	p.done("Wrote kubeconfig %s", kubeconfigPath)
-	record.Phase = phaseInstalled
-	return saveClusterRecord(dir, record)
+	return clusters.markInstalled(c)
 }
 
 // workloadIdentitiesFile is the output of hypershift create iam azure in the
@@ -275,14 +272,15 @@ func workloadIdentityName(hosted, component, infraID string) string {
 // Azure resources that only hyperctl knows about and the workload
 // identities.
 func destroyAzureHostedCluster(ctx context.Context, p progress, cmd *cli.Command, deps Deps, dirs xdg.Dirs, mgmt, hosted string) error {
-	dir := hostedDir(dirs, mgmt, hosted)
-	record, found, err := loadClusterRecord(dir)
+	clusters := newClusterStore(dirs)
+	c := hostedCluster(mgmt, hosted)
+	record, found, err := clusters.destroying(c)
 	if err != nil {
 		return err
 	}
 	if !found {
 		p.done("Creation never started, nothing to destroy")
-		return os.RemoveAll(dir)
+		return nil
 	}
 	cfg, err := loadConfig(dirs.Config)
 	if err != nil {
@@ -292,7 +290,7 @@ func destroyAzureHostedCluster(ctx context.Context, p progress, cmd *cli.Command
 	if err != nil {
 		return err
 	}
-	kubeconfig := mgmtKubeconfigPath(dirs, mgmt)
+	kubeconfig := clusters.kubeconfig(managementCluster(mgmt))
 	hs := deps.Hypershift(hypershiftPath, kubeconfig, p.tool("hypershift"))
 	params := hypershift.DestroyAzureParams{
 		Name:                 hosted,
@@ -330,7 +328,7 @@ func destroyAzureHostedCluster(ctx context.Context, p progress, cmd *cli.Command
 		return err
 	}
 
-	identitiesFile := workloadIdentitiesFile(dir)
+	identitiesFile := workloadIdentitiesFile(clusters.dir(c))
 	switch _, err := os.Stat(identitiesFile); {
 	case errors.Is(err, fs.ErrNotExist):
 		p.warn("Skipping the workload identities, %s does not exist. Destroying the shared resources deletes any that were created.", identitiesFile)
@@ -350,7 +348,7 @@ func destroyAzureHostedCluster(ctx context.Context, p progress, cmd *cli.Command
 		}
 	}
 	p.done("Destroyed hosted cluster %s (%s)", hosted, since(start))
-	return os.RemoveAll(dir)
+	return clusters.forget(c)
 }
 
 // deleteAzureHostedResources deletes the Azure resources of a hosted cluster

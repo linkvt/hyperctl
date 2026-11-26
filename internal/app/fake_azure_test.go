@@ -35,6 +35,8 @@ type fakeAzure struct {
 	// dnsRecords maps resourceGroup/zone to its records.
 	dnsRecords  map[string][]azureaccount.DNSRecord
 	aksClusters []azureaccount.AKSClusterParams
+	// createAKSClusterErr fails creating AKS clusters.
+	createAKSClusterErr error
 }
 
 type fakeRoleAssignment struct {
@@ -172,6 +174,9 @@ func (f *fakeAzure) DeleteDNSRecord(_ context.Context, resourceGroup, zone strin
 }
 
 func (f *fakeAzure) CreateAKSCluster(_ context.Context, params azureaccount.AKSClusterParams) error {
+	if f.createAKSClusterErr != nil {
+		return f.createAKSClusterErr
+	}
 	if _, found := f.resourceGroups[params.ResourceGroup]; !found {
 		return fmt.Errorf("resource group %s not found", params.ResourceGroup)
 	}

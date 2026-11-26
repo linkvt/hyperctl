@@ -1,0 +1,7 @@
+baseDomain: example.com
+phase: Installed
+platform: aws
+pullSecret: /home/tester/.openshift/pull-secret-latest.json
+region: eu-central-1
+release: 5.1.0-ec.0
+updatedAt: "2026-11-26T14:37:51.457077+01:00"

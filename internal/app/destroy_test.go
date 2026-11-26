@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/linkvt/hyperctl/internal/hypershift"
+	"github.com/linkvt/hyperctl/internal/ocp"
 )
 
 func TestDestroyHostedDestroysOnlyHostedCluster(t *testing.T) {
@@ -135,6 +136,91 @@ func TestDestroySkipsHostedClusterThatWasNeverCreated(t *testing.T) {
 	}
 	if got := len(env.images.destroys); got != 1 {
 		t.Errorf("expected 1 installer destroy call, got %d", got)
+	}
+}
+
+func TestDestroySkipsManagementClusterThatWasNeverInstalled(t *testing.T) {
+	env := newTestEnv(t)
+	env.run(t, "create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+		"--management-only",
+	)
+	// Create stopped between tracking the cluster and recording it.
+	clusterDir := filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt")
+	if err := os.Remove(filepath.Join(clusterDir, "cluster.yaml")); err != nil {
+		t.Fatal(err)
+	}
+
+	out := env.run(t, "destroy", "--yes")
+
+	if !strings.Contains(out, "Installation never started") {
+		t.Errorf("expected nothing to destroy, got:\n%s", out)
+	}
+	if got := len(env.images.destroys); got != 0 {
+		t.Errorf("expected no installer destroy call, got %d", got)
+	}
+	if _, err := os.Stat(clusterDir); !os.IsNotExist(err) {
+		t.Errorf("expected the cluster directory to be removed, got %v", err)
+	}
+}
+
+func TestDestroySkipsHostedClusterWithoutRecord(t *testing.T) {
+	env := newTestEnv(t)
+	env.run(t, "create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	)
+	// Create stopped between tracking the hosted cluster and recording it.
+	if err := os.Remove(filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/hosted/test-mgmt-workload/cluster.yaml")); err != nil {
+		t.Fatal(err)
+	}
+
+	out := env.run(t, "destroy", "hosted", "--yes")
+
+	if !strings.Contains(out, "Creation never started") {
+		t.Errorf("expected nothing to destroy, got:\n%s", out)
+	}
+	if destroys := len(env.hypershift.destroys) + len(env.hypershift.infraDestroys); destroys != 0 {
+		t.Errorf("expected no hosted cluster destroy, got %d", destroys)
+	}
+}
+
+// TestDestroyClustersRecordedByEarlierVersions destroys clusters from the
+// records in testdata/data, which earlier versions of hyperctl wrote.
+func TestDestroyClustersRecordedByEarlierVersions(t *testing.T) {
+	env := newTestEnv(t)
+	data := filepath.Join(env.home, ".local/share/hyperctl")
+	if err := os.CopyFS(data, os.DirFS(filepath.Join("testdata", "data"))); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(env.home, ".local/state/hyperctl")
+	mustMkdir(t, stateDir)
+	writeFile(t, filepath.Join(stateDir, "state.yaml"), "mgmtCluster: aws-mgmt\nhostedCluster: aws-mgmt-workload\n", 0o600)
+
+	env.run(t, "destroy", "--yes")
+
+	wantHosted := hypershift.DestroyClusterParams{Name: "aws-mgmt-workload", InfraID: "aws-mgmt-workload-abcde", Region: "eu-central-1", BaseDomain: "example.com"}
+	if got := single(t, env.hypershift.destroys).params; got != wantHosted {
+		t.Errorf("hypershift destroy cluster:\ngot:  %+v\nwant: %+v", got, wantHosted)
+	}
+	if len(env.images.destroys) != 1 {
+		t.Fatalf("expected 1 installer destroy call, got %+v", env.images.destroys)
+	}
+	if got, want := env.images.destroys[0].installDir, filepath.Join(data, "clusters/aws-mgmt/install"); got != want {
+		t.Errorf("installer destroy dir: got %s, want %s", got, want)
+	}
+	// The installer for the recorded release was extracted to destroy.
+	installer := fakeInstallerPath(filepath.Join(env.home, ".cache/hyperctl/releases"), ocp.ParseRelease("5.1.0-ec.0"))
+	if _, err := os.Stat(installer.Path); err != nil {
+		t.Errorf("expected the installer of the recorded release: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(data, "clusters/aws-mgmt")); !os.IsNotExist(err) {
+		t.Errorf("expected the cluster directory to be removed, got %v", err)
 	}
 }
 

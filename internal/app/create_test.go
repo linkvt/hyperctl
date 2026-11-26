@@ -637,6 +637,29 @@ func TestCreateSkipsCreatedHostedCluster(t *testing.T) {
 	}
 }
 
+func TestCreateRefusesIncompleteHostedCluster(t *testing.T) {
+	env := newTestEnv(t)
+	args := []string{"create",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-mgmt",
+		"--pull-secret", env.pullSecret,
+	}
+	env.hypershift.createClusterErr = errors.New("hypershift create cluster: exit status 1")
+	if _, err := env.runErr(t, args...); err == nil {
+		t.Fatal("expected failing hypershift to fail create")
+	}
+	env.hypershift.createClusterErr = nil
+
+	_, err := env.runErr(t, args...)
+
+	if err == nil || !strings.Contains(err.Error(), "previous creation of hosted cluster test-mgmt-workload did not complete") {
+		t.Errorf("expected incomplete creation error, got %v", err)
+	}
+	if creates := len(env.hypershift.clusters); creates != 1 {
+		t.Errorf("expected 1 hosted cluster creation, got %d", creates)
+	}
+}
 func TestCreateRefusesSecondManagementCluster(t *testing.T) {
 	env := newTestEnv(t)
 	env.createClusters(t)

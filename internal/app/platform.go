@@ -22,7 +22,7 @@ func resolvePlatform(ctx context.Context, p progress, cmd *cli.Command, deps Dep
 	}
 
 	if st.MgmtCluster != "" {
-		record, found, err := loadClusterRecord(clusterDir(dirs, st.MgmtCluster))
+		record, found, err := newClusterStore(dirs).load(managementCluster(st.MgmtCluster))
 		if err != nil {
 			return "", err
 		}

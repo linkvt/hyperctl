@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -151,7 +150,7 @@ func runDestroyShared(ctx context.Context, cmd *cli.Command, deps Deps, dirs xdg
 // writes it before the first cloud resource, and destroying such a cluster
 // is a no-op on either platform. AWS is returned then, as the default.
 func trackedPlatform(dirs xdg.Dirs, st state) (string, error) {
-	record, found, err := loadClusterRecord(clusterDir(dirs, st.MgmtCluster))
+	record, found, err := newClusterStore(dirs).load(managementCluster(st.MgmtCluster))
 	if err != nil {
 		return "", err
 	}
@@ -172,7 +171,7 @@ func destroyAWSHostedCluster(ctx context.Context, p progress, cmd *cli.Command, 
 	if err != nil {
 		return err
 	}
-	hs := deps.Hypershift(hypershiftPath, mgmtKubeconfigPath(dirs, mgmt), p.tool("hypershift"))
+	hs := deps.Hypershift(hypershiftPath, newClusterStore(dirs).kubeconfig(managementCluster(mgmt)), p.tool("hypershift"))
 	return destroyHostedCluster(ctx, p, cmd.Bool("yes"), deps, hs, dirs, mgmt, hosted)
 }
 
@@ -189,14 +188,15 @@ func destroyTargets(st state, scope string) []string {
 }
 
 func destroyHostedCluster(ctx context.Context, p progress, yes bool, deps Deps, hs Hypershift, dirs xdg.Dirs, mgmt, hosted string) error {
-	dir := hostedDir(dirs, mgmt, hosted)
-	record, found, err := loadClusterRecord(dir)
+	clusters := newClusterStore(dirs)
+	c := hostedCluster(mgmt, hosted)
+	record, found, err := clusters.destroying(c)
 	if err != nil {
 		return err
 	}
 	if !found {
 		p.done("Creation never started, nothing to destroy")
-		return os.RemoveAll(dir)
+		return nil
 	}
 	params := hypershift.DestroyClusterParams{
 		Name:       hosted,
@@ -206,7 +206,7 @@ func destroyHostedCluster(ctx context.Context, p progress, yes bool, deps Deps, 
 	}
 	var ready bool
 	_ = p.wait(ctx, "Checking the management cluster API", func(ctx context.Context) error {
-		ready = deps.Cluster.Ready(ctx, mgmtKubeconfigPath(dirs, mgmt))
+		ready = deps.Cluster.Ready(ctx, clusters.kubeconfig(managementCluster(mgmt)))
 		return nil
 	})
 	start := time.Now()
@@ -228,18 +228,19 @@ func destroyHostedCluster(ctx context.Context, p progress, yes bool, deps Deps, 
 	if err := deleteDNSLeftovers(ctx, p, deps, yes, record.BaseDomain, hosted); err != nil {
 		return err
 	}
-	return os.RemoveAll(dir)
+	return clusters.forget(c)
 }
 
 func destroyMgmtCluster(ctx context.Context, p progress, yes bool, deps Deps, dirs xdg.Dirs, name string) error {
-	dir := clusterDir(dirs, name)
-	record, found, err := loadClusterRecord(dir)
+	clusters := newClusterStore(dirs)
+	c := managementCluster(name)
+	record, found, err := clusters.destroying(c)
 	if err != nil {
 		return err
 	}
 	if !found {
 		p.done("Installation never started, nothing to destroy")
-		return os.RemoveAll(dir)
+		return nil
 	}
 	installer, err := ensureInstaller(ctx, p, deps.ReleaseImages, dirs, ocp.ParseRelease(record.Release), record.PullSecret)
 	if err != nil {
@@ -247,12 +248,12 @@ func destroyMgmtCluster(ctx context.Context, p progress, yes bool, deps Deps, di
 	}
 	p.info("Destroying")
 	start := time.Now()
-	if err := deps.ReleaseImages.DestroyCluster(ctx, installer, installDir(dirs, name), p.tool("openshift-install")); err != nil {
+	if err := deps.ReleaseImages.DestroyCluster(ctx, installer, clusters.installDir(c), p.tool("openshift-install")); err != nil {
 		return err
 	}
 	p.done("Destroyed management cluster %s (%s)", name, since(start))
 	if err := deleteDNSLeftovers(ctx, p, deps, yes, record.BaseDomain, name); err != nil {
 		return err
 	}
-	return os.RemoveAll(dir)
+	return clusters.forget(c)
 }

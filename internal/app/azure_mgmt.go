@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/linkvt/hyperctl/internal/azureaccount"
@@ -13,28 +12,24 @@ import (
 // ensureAKSCluster creates the AKS management cluster unless it is
 // installed, tracking progress in the cluster record.
 func ensureAKSCluster(ctx context.Context, p progress, account AzureAccount, dirs xdg.Dirs, opts createOptions, zones []string) error {
-	dir := clusterDir(dirs, opts.Name)
-	record, found, err := loadClusterRecord(dir)
+	clusters := newClusterStore(dirs)
+	c := managementCluster(opts.Name)
+	installed, err := clusters.check(c)
 	if err != nil {
 		return err
 	}
-	switch {
-	case found && record.Phase == phaseInstalled:
+	if installed {
 		p.done("Management cluster %s is already installed", opts.Name)
 		return nil
-	case found:
-		return fmt.Errorf("previous installation of management cluster %s did not complete, destroy it first", opts.Name)
 	}
 
-	record = clusterRecord{
+	if err := clusters.begin(c, clusterRecord{
 		Platform:   platformAzure,
-		Phase:      phaseInstalling,
 		Release:    opts.Release,
 		Region:     opts.Region,
 		BaseDomain: opts.BaseDomain,
 		PullSecret: opts.PullSecret,
-	}
-	if err := saveClusterRecord(dir, record); err != nil {
+	}); err != nil {
 		return err
 	}
 	resourceGroup := aksResourceGroup(opts.Name)
@@ -59,11 +54,10 @@ func ensureAKSCluster(ctx context.Context, p progress, account AzureAccount, dir
 	if err != nil {
 		return err
 	}
-	if err := writeFile(mgmtKubeconfigPath(dirs, opts.Name), kubeconfig); err != nil {
+	if err := writeFile(clusters.kubeconfig(c), kubeconfig); err != nil {
 		return err
 	}
-	record.Phase = phaseInstalled
-	if err := saveClusterRecord(dir, record); err != nil {
+	if err := clusters.markInstalled(c); err != nil {
 		return err
 	}
 	p.done("Installed management cluster %s (%s)", opts.Name, since(start))
@@ -78,14 +72,15 @@ func aksResourceGroup(name string) string {
 // destroyAKSCluster deletes the resource group of the AKS management cluster
 // and the node resource group Azure manages for it.
 func destroyAKSCluster(ctx context.Context, p progress, account AzureAccount, dirs xdg.Dirs, name string) error {
-	dir := clusterDir(dirs, name)
-	record, found, err := loadClusterRecord(dir)
+	clusters := newClusterStore(dirs)
+	c := managementCluster(name)
+	record, found, err := clusters.destroying(c)
 	if err != nil {
 		return err
 	}
 	if !found {
 		p.done("Installation never started, nothing to destroy")
-		return os.RemoveAll(dir)
+		return nil
 	}
 	resourceGroup := aksResourceGroup(name)
 	// Azure deletes the node resource group with the cluster, deleting it
@@ -102,5 +97,5 @@ func destroyAKSCluster(ctx context.Context, p progress, account AzureAccount, di
 		return err
 	}
 	p.done("Destroyed management cluster %s (%s)", name, since(start))
-	return os.RemoveAll(dir)
+	return clusters.forget(c)
 }
