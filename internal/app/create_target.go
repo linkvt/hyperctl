@@ -38,6 +38,9 @@ func resolveCreateTarget(ctx context.Context, cmd *cli.Command, deps Deps, clust
 		name = os.Getenv("USER") + "-karpenter"
 	}
 	name = flagOr(cmd, "name", name)
+	if cmd.IsSet("name") && name == "" {
+		return createTarget{}, errors.New("--name must not be empty")
+	}
 	if prompts(cmd, deps) && !cmd.IsSet("name") {
 		if err := promptName(ctx, setup.clusterTitle()+" name", &name); err != nil {
 			return createTarget{}, err
@@ -64,6 +67,9 @@ func resolveCreateTarget(ctx context.Context, cmd *cli.Command, deps Deps, clust
 		t.hostedName = name + "-workload"
 	}
 	t.hostedName = flagOr(cmd, "hosted-name", t.hostedName)
+	if cmd.IsSet("hosted-name") && t.hostedName == "" {
+		return createTarget{}, errors.New("--hosted-name must not be empty")
+	}
 	if prompts(cmd, deps) && !cmd.IsSet("hosted-name") {
 		if err := promptName(ctx, "Hosted cluster name", &t.hostedName); err != nil {
 			return createTarget{}, err

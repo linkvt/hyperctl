@@ -352,8 +352,15 @@ func deleteAzureHostedResources(ctx context.Context, account AzureAccount, subsc
 	if err != nil {
 		return err
 	}
-	names := externalDNSRecordNames(hosted)
+	hosts, owners := externalDNSRecordNames(hosted)
 	for _, r := range records {
+		// A TXT record name of this cluster may be the host name of
+		// another one, e.g. api-x-external-dns of hosted cluster
+		// x-external-dns, so the type decides as well.
+		names := hosts
+		if r.Type == "TXT" {
+			names = owners
+		}
 		if !slices.Contains(names, r.Name) {
 			continue
 		}
@@ -387,18 +394,18 @@ func deleteAzureHostedResources(ctx context.Context, account AzureAccount, subsc
 }
 
 // externalDNSRecordNames returns the names of the External DNS records of a
-// hosted cluster: the host names hypershift gives its services and the TXT
-// records External DNS keeps to own them, which hypershift names with the
-// suffix -external-dns and newer External DNS versions also with the record
-// type as prefix.
-func externalDNSRecordNames(hosted string) []string {
-	var names []string
+// hosted cluster: the host names hypershift gives its services, and the
+// names of the TXT records External DNS keeps to own them, which hypershift
+// names with the suffix -external-dns and newer External DNS versions also
+// with the record type as prefix.
+func externalDNSRecordNames(hosted string) (hosts, owners []string) {
 	for _, service := range []string{"api", "oauth", "konnectivity", "ignition"} {
 		host := service + "-" + hosted
-		names = append(names, host, host+"-external-dns")
+		hosts = append(hosts, host)
+		owners = append(owners, host+"-external-dns")
 		for _, recordType := range []string{"a", "aaaa", "cname"} {
-			names = append(names, recordType+"-"+host+"-external-dns")
+			owners = append(owners, recordType+"-"+host+"-external-dns")
 		}
 	}
-	return names
+	return hosts, owners
 }

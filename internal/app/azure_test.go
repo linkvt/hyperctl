@@ -583,6 +583,9 @@ func TestDestroyAzureKeepsExternalDNSRecordsOfOtherHostedClusters(t *testing.T) 
 		{Name: "a-api-other-external-dns", Type: "TXT"},
 		{Name: "api-test-mgmt-workload-2", Type: "A"},
 		{Name: "a-api-test-mgmt-workload-2-external-dns", Type: "TXT"},
+		// The API host of a hosted cluster test-mgmt-workload-external-dns
+		// has the name of a TXT record of test-mgmt-workload.
+		{Name: "api-test-mgmt-workload-external-dns", Type: "A"},
 	}
 
 	env.run(t, "destroy", "--yes")
@@ -597,6 +600,7 @@ func TestDestroyAzureKeepsExternalDNSRecordsOfOtherHostedClusters(t *testing.T) 
 		"TXT a-api-other-external-dns",
 		"A api-test-mgmt-workload-2",
 		"TXT a-api-test-mgmt-workload-2-external-dns",
+		"A api-test-mgmt-workload-external-dns",
 	}
 	if !slices.Equal(zoneRecords, want) {
 		t.Errorf("External DNS zone records:\ngot:  %v\nwant: %v", zoneRecords, want)

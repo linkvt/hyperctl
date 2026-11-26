@@ -256,6 +256,40 @@ func TestCreateRejectsNamesOfOtherClusters(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsEmptyNames(t *testing.T) {
+	tests := map[string]struct {
+		args []string
+		want string
+	}{
+		"name": {
+			args: []string{"--name", ""},
+			want: "--name must not be empty",
+		},
+		"hosted name": {
+			args: []string{"--name", "test-mgmt", "--hosted-name", ""},
+			want: "--hosted-name must not be empty",
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			env := newTestEnv(t)
+			env.run(t, "create", "--setup", "management", "--release", "5.1.0-ec.0", "--region", "eu-central-1", "--name", "test-mgmt", "--pull-secret", env.pullSecret)
+
+			out, err := env.runErr(t, append([]string{"create", "--setup", "hosted", "--release", "5.2.0"}, tc.args...)...)
+
+			if err == nil || err.Error() != tc.want {
+				t.Errorf("got %v, want %q", err, tc.want)
+			}
+			if strings.Contains(out, "AWS identity") {
+				t.Errorf("expected no account check, got:\n%s", out)
+			}
+			if got := len(env.hypershift.clusters); got != 0 {
+				t.Errorf("expected no hosted cluster, got %d", got)
+			}
+		})
+	}
+}
+
 func TestCreateRejectsFlagsThatDifferFromExistingCluster(t *testing.T) {
 	tests := map[string]struct {
 		args []string
