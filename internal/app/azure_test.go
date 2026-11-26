@@ -563,6 +563,45 @@ func TestDestroyAzureDestroysHostedAndManagementCluster(t *testing.T) {
 	}
 }
 
+func TestDestroyAzureKeepsExternalDNSRecordsOfOtherHostedClusters(t *testing.T) {
+	env := newTestEnv(t)
+	env.createAzureClusters(t)
+	zone := "tester-hyperctl/" + testAzureDNSZone
+	env.azure.dnsRecords[zone] = []azureaccount.DNSRecord{
+		{Name: "@", Type: "NS"},
+		{Name: "api-test-mgmt-workload", Type: "A"},
+		{Name: "api-test-mgmt-workload-external-dns", Type: "TXT"},
+		{Name: "a-api-test-mgmt-workload-external-dns", Type: "TXT"},
+		{Name: "oauth-test-mgmt-workload", Type: "CNAME"},
+		{Name: "cname-oauth-test-mgmt-workload-external-dns", Type: "TXT"},
+		{Name: "konnectivity-test-mgmt-workload", Type: "A"},
+		{Name: "aaaa-konnectivity-test-mgmt-workload-external-dns", Type: "TXT"},
+		{Name: "ignition-test-mgmt-workload", Type: "A"},
+		{Name: "ignition-test-mgmt-workload-external-dns", Type: "TXT"},
+		{Name: "api-other", Type: "A"},
+		{Name: "a-api-other-external-dns", Type: "TXT"},
+		{Name: "api-test-mgmt-workload-2", Type: "A"},
+		{Name: "a-api-test-mgmt-workload-2-external-dns", Type: "TXT"},
+	}
+
+	env.run(t, "destroy", "--yes")
+
+	var zoneRecords []string
+	for _, r := range env.azure.dnsRecords[zone] {
+		zoneRecords = append(zoneRecords, r.Type+" "+r.Name)
+	}
+	want := []string{
+		"NS @",
+		"A api-other",
+		"TXT a-api-other-external-dns",
+		"A api-test-mgmt-workload-2",
+		"TXT a-api-test-mgmt-workload-2-external-dns",
+	}
+	if !slices.Equal(zoneRecords, want) {
+		t.Errorf("External DNS zone records:\ngot:  %v\nwant: %v", zoneRecords, want)
+	}
+}
+
 func TestDestroyAzureHostedWhenManagementClusterIsUnreachable(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)

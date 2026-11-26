@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -345,14 +346,15 @@ func destroyAzureHostedCluster(ctx context.Context, p progress, deps Deps, dirs 
 // zone. The role assignment must be deleted before the workload identities.
 func deleteAzureHostedResources(ctx context.Context, account AzureAccount, subscriptionID, hosted string, record clusterRecord) error {
 	shared := record.Azure
-	// External DNS only deletes its records after a while. The zone holds
-	// only the records of this hosted cluster, as there is only one.
+	// External DNS only deletes its records after a while. The zone is
+	// shared by all hosted clusters, so only the records of this one go.
 	records, err := account.DNSRecords(ctx, shared.ResourceGroup, shared.DNSZone)
 	if err != nil {
 		return err
 	}
+	names := externalDNSRecordNames(hosted)
 	for _, r := range records {
-		if r.Name == "@" {
+		if !slices.Contains(names, r.Name) {
 			continue
 		}
 		if err := account.DeleteDNSRecord(ctx, shared.ResourceGroup, shared.DNSZone, r); err != nil {
@@ -382,4 +384,21 @@ func deleteAzureHostedResources(ctx context.Context, account AzureAccount, subsc
 		return err
 	}
 	return account.DeleteRoleAssignments(ctx, dnsZoneScope(subscriptionID, shared.BaseDomainResourceGroup, record.BaseDomain), ingress)
+}
+
+// externalDNSRecordNames returns the names of the External DNS records of a
+// hosted cluster: the host names hypershift gives its services and the TXT
+// records External DNS keeps to own them, which hypershift names with the
+// suffix -external-dns and newer External DNS versions also with the record
+// type as prefix.
+func externalDNSRecordNames(hosted string) []string {
+	var names []string
+	for _, service := range []string{"api", "oauth", "konnectivity", "ignition"} {
+		host := service + "-" + hosted
+		names = append(names, host, host+"-external-dns")
+		for _, recordType := range []string{"a", "aaaa", "cname"} {
+			names = append(names, recordType+"-"+host+"-external-dns")
+		}
+	}
+	return names
 }
