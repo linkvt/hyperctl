@@ -91,16 +91,20 @@ func resolvePlatform(ctx context.Context, p progress, cmd *cli.Command, deps Dep
 		}
 	}
 
-	if st.MgmtCluster != "" {
-		record, found, err := clusters.load(managementCluster(st.MgmtCluster))
+	current, found, err := currentCluster(clusters, st)
+	if err != nil {
+		return "", err
+	}
+	if found {
+		record, found, err := clusters.load(managementCluster(current.mgmt))
 		if err != nil {
 			return "", err
 		}
 		if found {
 			if cmd.IsSet("platform") && platform != record.Platform {
-				return "", fmt.Errorf("management cluster %s runs on %s, destroy it first", st.MgmtCluster, record.Platform)
+				return "", fmt.Errorf("management cluster %s runs on %s, destroy it first", current.mgmt, record.Platform)
 			}
-			p.done("Platform %s (management cluster %s)", record.Platform, st.MgmtCluster)
+			p.done("Platform %s (management cluster %s)", record.Platform, current.mgmt)
 			return record.Platform, nil
 		}
 	}

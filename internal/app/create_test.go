@@ -474,16 +474,8 @@ func TestCreateSetupManagementSkipsHostedCluster(t *testing.T) {
 		t.Errorf("hosted cluster DNS leftovers should remain untouched, got %v", got)
 	}
 
-	var state struct {
-		MgmtCluster   string `json:"mgmtCluster"`
-		HostedCluster string `json:"hostedCluster"`
-	}
-	statePath := filepath.Join(env.home, ".local", "state", "hyperctl", "state.yaml")
-	if err := yaml.Unmarshal([]byte(readFile(t, statePath)), &state); err != nil {
-		t.Fatalf("parsing state: %v", err)
-	}
-	if state.MgmtCluster != "test-mgmt" || state.HostedCluster != "" {
-		t.Errorf("state: got management %q, hosted %q; want management test-mgmt and no hosted cluster", state.MgmtCluster, state.HostedCluster)
+	if got := env.currentCluster(t); got != "test-mgmt" {
+		t.Errorf("current cluster: got %q, want test-mgmt", got)
 	}
 	if !strings.Contains(output, "Done, use the cluster kubeconfig with:\n") || !strings.Contains(output, "export KUBECONFIG=$(hyperctl kubeconfig)") {
 		t.Errorf("setup management completion should use the common kubeconfig command, got:\n%s", output)

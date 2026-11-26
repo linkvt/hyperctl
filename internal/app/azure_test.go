@@ -120,8 +120,9 @@ func TestCreateAzureCreatesAKSManagementCluster(t *testing.T) {
 	if content := readFile(t, kubeconfig); !strings.Contains(content, "test-mgmt.hcp.example.azmk8s.io") {
 		t.Errorf("expected the AKS kubeconfig, got:\n%s", content)
 	}
-	if got := env.run(t, "kubeconfig", "mgmt"); strings.TrimSpace(got) != kubeconfig {
-		t.Errorf("kubeconfig mgmt: got %q, want %q", got, kubeconfig)
+	paths := strings.Split(strings.TrimSpace(env.run(t, "kubeconfig")), string(os.PathListSeparator))
+	if got := paths[len(paths)-1]; got != kubeconfig {
+		t.Errorf("management cluster kubeconfig: got %q, want %q", got, kubeconfig)
 	}
 }
 
@@ -558,7 +559,7 @@ func TestDestroyAzureDestroysHostedAndManagementCluster(t *testing.T) {
 	if _, found := env.azure.resourceGroups["tester-hyperctl"]; !found {
 		t.Error("expected the shared resource group to be kept")
 	}
-	if out := env.run(t, "status"); !strings.Contains(out, "No clusters") {
+	if out := env.run(t, "list"); !strings.Contains(out, "No clusters") {
 		t.Errorf("expected no clusters after destroy, got:\n%s", out)
 	}
 }
@@ -607,7 +608,7 @@ func TestDestroyAzureHostedWhenManagementClusterIsUnreachable(t *testing.T) {
 	env.createAzureClusters(t)
 	env.cluster.apiDown = true
 
-	env.run(t, "destroy", "hosted", "--yes")
+	env.run(t, "destroy", "--cluster", "test-mgmt-workload", "--yes")
 
 	if got := env.hypershift.azureDestroys; len(got) != 0 {
 		t.Errorf("expected no hypershift destroy cluster, got %+v", got)
@@ -627,12 +628,12 @@ func TestDestroyAzureHostedDestroysHostedCluster(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)
 
-	env.run(t, "destroy", "hosted", "--yes")
+	env.run(t, "destroy", "--cluster", "test-mgmt-workload", "--yes")
 
 	if got := env.hypershift.azureDestroys; len(got) != 1 {
 		t.Errorf("expected hypershift destroy cluster, got %+v", got)
 	}
-	if _, err := env.runErr(t, "kubeconfig", "hosted"); err == nil {
+	if _, err := env.runErr(t, "kubeconfig", "--cluster", "test-mgmt-workload"); err == nil {
 		t.Error("expected no hosted cluster after destroy")
 	}
 }
@@ -642,7 +643,7 @@ func TestDestroyAzureHostedStopsWhenDestroyClusterFails(t *testing.T) {
 	env.createAzureClusters(t)
 	env.hypershift.destroyAzureClusterErr = errors.New("hypershift destroy cluster: exit status 1")
 
-	_, err := env.runErr(t, "destroy", "hosted", "--yes")
+	_, err := env.runErr(t, "destroy", "--cluster", "test-mgmt-workload", "--yes")
 
 	if err == nil || !strings.Contains(err.Error(), "hypershift destroy cluster") {
 		t.Errorf("expected the hypershift error, got %v", err)
@@ -662,7 +663,7 @@ func TestDestroyAzureHostedWithoutWorkloadIdentitiesFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := env.run(t, "destroy", "hosted", "--yes")
+	out := env.run(t, "destroy", "--cluster", "test-mgmt-workload", "--yes")
 
 	if got := env.hypershift.azureIAMDestroys; len(got) != 0 {
 		t.Errorf("expected no hypershift destroy iam, got %+v", got)
@@ -682,7 +683,7 @@ func TestDestroyAzureHostedWithoutClusterRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := env.run(t, "destroy", "hosted", "--yes")
+	out := env.run(t, "destroy", "--cluster", "test-mgmt-workload", "--yes")
 
 	if !strings.Contains(out, "Creation never started") {
 		t.Errorf("expected nothing to destroy, got:\n%s", out)
@@ -721,7 +722,7 @@ func TestDestroySharedRequiresDestroyedClusters(t *testing.T) {
 
 	_, err := env.runErr(t, "destroy", "shared", "--platform", "azure", "--yes")
 
-	if err == nil || !strings.Contains(err.Error(), "destroy it first") {
+	if err == nil || !strings.Contains(err.Error(), "clusters on azure exist, destroy them first: test-mgmt, test-mgmt-workload") {
 		t.Errorf("expected an error about the management cluster, got %v", err)
 	}
 	if len(env.azure.deletedApplications) != 0 {

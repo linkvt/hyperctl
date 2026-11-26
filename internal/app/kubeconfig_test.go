@@ -15,16 +15,12 @@ func TestKubeconfigPrintsKubeconfigPaths(t *testing.T) {
 		args        []string
 		wantServers []string
 	}{
-		"mgmt": {
-			args:        []string{"kubeconfig", "mgmt"},
-			wantServers: []string{"https://api.mgmt.fake:6443"},
-		},
-		"hosted": {
-			args:        []string{"kubeconfig", "hosted"},
-			wantServers: []string{"https://api.hosted.fake:6443"},
-		},
-		"both by default, hosted first": {
+		"current management cluster with one hosted cluster, hosted first": {
 			args:        []string{"kubeconfig"},
+			wantServers: []string{"https://api.hosted.fake:6443", "https://api.mgmt.fake:6443"},
+		},
+		"hosted cluster, hosted first": {
+			args:        []string{"kubeconfig", "--cluster", "test-mgmt-workload"},
 			wantServers: []string{"https://api.hosted.fake:6443", "https://api.mgmt.fake:6443"},
 		},
 	}
@@ -44,6 +40,19 @@ func TestKubeconfigPrintsKubeconfigPaths(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestKubeconfigRejectsClusterArguments(t *testing.T) {
+	env := newTestEnv(t)
+	env.createClusters(t)
+
+	for _, arg := range []string{"hosted", "mgmt"} {
+		_, err := env.runErr(t, "kubeconfig", arg)
+
+		if err == nil || !strings.Contains(err.Error(), "select the cluster with --cluster <name>") {
+			t.Errorf("kubeconfig %s: expected a hint to --cluster, got %v", arg, err)
+		}
 	}
 }
 
@@ -102,29 +111,25 @@ func TestKubeconfigDuringHostedInstallation(t *testing.T) {
 		wantServers []string
 		wantError   string
 	}{
-		"hosted before installation finishes": {
-			cluster: "hosted", published: true,
-			wantServers: []string{"https://api.hosted.fake:6443"},
+		"hosted cluster before installation finishes, hosted first": {
+			cluster: "test-mgmt-workload", published: true,
+			wantServers: []string{"https://api.hosted.fake:6443", "https://api.mgmt.fake:6443"},
 		},
-		"both before installation finishes, hosted first": {
+		"management cluster before installation finishes, hosted first": {
 			published:   true,
 			wantServers: []string{"https://api.hosted.fake:6443", "https://api.mgmt.fake:6443"},
 		},
-		"default before kubeconfig is published": {
+		"management cluster before kubeconfig is published": {
 			wantServers: []string{"https://api.mgmt.fake:6443"},
 		},
-		"hosted before kubeconfig is published": {
-			cluster: "hosted", wantError: "hosted kubeconfig not available yet",
+		"hosted cluster before kubeconfig is published": {
+			cluster: "test-mgmt-workload", wantError: "hosted kubeconfig not available yet",
 		},
-		"default surfaces authorization failure": {
+		"management cluster surfaces authorization failure": {
 			lookupError: "Forbidden: cannot get hostedclusters", wantError: "Forbidden",
 		},
-		"hosted surfaces network failure": {
-			cluster: "hosted", lookupError: "connection refused", wantError: "connection refused",
-		},
-		"mgmt never queries the cluster": {
-			cluster: "mgmt", lookupError: "connection refused",
-			wantServers: []string{"https://api.mgmt.fake:6443"},
+		"hosted cluster surfaces network failure": {
+			cluster: "test-mgmt-workload", lookupError: "connection refused", wantError: "connection refused",
 		},
 	}
 	for name, tc := range tests {
@@ -142,7 +147,7 @@ func TestKubeconfigDuringHostedInstallation(t *testing.T) {
 
 			args := []string{"kubeconfig"}
 			if tc.cluster != "" {
-				args = append(args, tc.cluster)
+				args = append(args, "--cluster", tc.cluster)
 			}
 			out, err := env.runErr(t, args...)
 			if tc.wantError != "" {
@@ -168,11 +173,6 @@ func TestKubeconfigDuringHostedInstallation(t *testing.T) {
 			}
 			if got := readFile(t, recordPath); got != record {
 				t.Error("fetching kubeconfig changed the installation record")
-			}
-			if tc.cluster == "mgmt" {
-				if lookups := env.cluster.hostedKubeconfigLookups; lookups != 0 {
-					t.Errorf("mgmt queried the hosted cluster %d times", lookups)
-				}
 			}
 			if !tc.published {
 				if _, err := os.Stat(filepath.Join(dir, "kubeconfig")); !os.IsNotExist(err) {
@@ -212,8 +212,8 @@ func TestKubeconfigCachedFilesWorkOffline(t *testing.T) {
 	env.cluster.hostedKubeconfigErr = errors.New("connection refused")
 
 	env.run(t, "kubeconfig")
-	env.run(t, "kubeconfig", "hosted")
-	env.run(t, "kubeconfig", "mgmt")
+	env.run(t, "kubeconfig", "--cluster", "test-mgmt-workload")
+	env.run(t, "kubeconfig", "--cluster", "test-mgmt")
 
 	if lookups := env.cluster.hostedKubeconfigLookups; lookups != 0 {
 		t.Errorf("cached kubeconfigs queried the cluster %d times", lookups)

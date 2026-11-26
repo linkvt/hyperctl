@@ -7,110 +7,107 @@ import (
 	"path/filepath"
 
 	"github.com/urfave/cli/v3"
-
-	"github.com/linkvt/hyperctl/internal/xdg"
 )
 
 func statusCommand(deps Deps) *cli.Command {
 	return &cli.Command{
 		Name:  "status",
-		Usage: "Show the state of the management and hosted cluster",
+		Usage: "Show the state of the cluster and its management or hosted clusters",
+		Flags: []cli.Flag{clusterFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// Progress goes to stderr, keeping stdout for the status.
-			return runStatus(ctx, deps.Cluster, cmd.Root().Writer, progress{w: cmd.Root().ErrWriter, interactive: deps.Interactive})
+			return runStatus(ctx, cmd, deps.Cluster, cmd.Root().Writer, progress{w: cmd.Root().ErrWriter, interactive: deps.Interactive})
 		},
 	}
 }
 
-func runStatus(ctx context.Context, cluster ClusterAPI, w io.Writer, p progress) error {
-	dirs, err := xdg.Resolve("hyperctl")
+// runStatus shows the selected cluster with its relatives: a management
+// cluster with its hosted clusters, a hosted cluster with its management
+// cluster.
+func runStatus(ctx context.Context, cmd *cli.Command, cluster ClusterAPI, w io.Writer, p progress) error {
+	sel, err := selectCluster(cmd)
 	if err != nil {
 		return err
 	}
-	st, err := loadState(dirs.State)
-	if err != nil {
-		return err
-	}
-	if st.MgmtCluster == "" {
-		_, err := fmt.Fprintln(w, "No clusters, create them with: hyperctl create")
-		return err
+	mgmt := sel.management()
+	hosted := clusterList{sel.cluster}
+	if !sel.cluster.isHosted() {
+		hosted = sel.clusters.hosted(mgmt.mgmt)
 	}
 
-	clusters := newClusterStore(dirs)
-	mgmtRef := managementCluster(st.MgmtCluster)
-	mgmt, found, err := clusters.load(mgmtRef)
-	if err != nil {
-		return err
-	}
-	if !found {
-		_, _ = fmt.Fprintf(w, "%s %s\n", st.Setup.clusterTitle(), st.MgmtCluster)
+	if !mgmt.recorded {
+		st, err := loadState(sel.dirs.State)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(w, "%s %s\n", st.Setup.clusterTitle(), mgmt.mgmt)
 		field(w, "Phase", "not created")
 		return nil
 	}
 	title, operator := "Management cluster", "installed"
-	if !mgmt.hasOperator() {
+	if !mgmt.record.hasOperator() {
 		title, operator = "Cluster", "not installed"
 	}
-	_, _ = fmt.Fprintf(w, "%s %s\n", title, st.MgmtCluster)
-	kubeconfig := clusters.kubeconfig(mgmtRef)
+	_, _ = fmt.Fprintf(w, "%s %s\n", title, mgmt.mgmt)
+	kubeconfig := sel.store.kubeconfig(mgmt.clusterRef)
 	var ready bool
-	if mgmt.Phase == phaseInstalled {
+	if mgmt.record.Phase == phaseInstalled {
 		_ = p.wait(ctx, "Checking the management cluster API", func(ctx context.Context) error {
 			ready = cluster.Ready(ctx, kubeconfig)
 			return nil
 		})
 	}
-	printPhase(w, mgmt, "hyperctl destroy")
-	field(w, "Platform", mgmt.Platform)
-	if mgmt.Release != "" {
-		field(w, "Release", mgmt.Release)
+	printPhase(w, mgmt.record, "hyperctl destroy --cluster "+mgmt.mgmt)
+	field(w, "Platform", mgmt.record.Platform)
+	if mgmt.record.Release != "" {
+		field(w, "Release", mgmt.record.Release)
 	}
-	field(w, "Region", mgmt.Region)
+	field(w, "Region", mgmt.record.Region)
 	field(w, "HyperShift", operator)
 	switch {
-	case mgmt.Phase != phaseInstalled:
-		field(w, "Log", filepath.Join(clusters.installDir(mgmtRef), ".openshift_install.log"))
+	case mgmt.record.Phase != phaseInstalled:
+		field(w, "Log", filepath.Join(sel.store.installDir(mgmt.clusterRef), ".openshift_install.log"))
 	case ready:
 		field(w, "API", "reachable")
 		field(w, "Kubeconfig", kubeconfig)
 	default:
-		field(w, "API", "unreachable, the instances may have been pruned, recreate the clusters with: hyperctl destroy && hyperctl create")
+		field(w, "API", fmt.Sprintf("unreachable, the instances may have been pruned, recreate the cluster with: hyperctl destroy --cluster %s && hyperctl create --name %s", mgmt.mgmt, mgmt.mgmt))
 	}
 
-	if st.HostedCluster == "" {
-		return nil
+	for _, h := range hosted {
+		printHostedStatus(ctx, w, p, cluster, sel.store, kubeconfig, ready, h)
 	}
-	hostedRef := hostedCluster(st.MgmtCluster, st.HostedCluster)
-	hosted, found, err := clusters.load(hostedRef)
-	if err != nil {
-		return err
-	}
-	_, _ = fmt.Fprintf(w, "\nHosted cluster %s\n", st.HostedCluster)
-	if !found {
+	return nil
+}
+
+// printHostedStatus shows a hosted cluster, with the live checks if its
+// management cluster is ready.
+func printHostedStatus(ctx context.Context, w io.Writer, p progress, cluster ClusterAPI, clusters clusterStore, kubeconfig string, ready bool, hosted storedCluster) {
+	_, _ = fmt.Fprintf(w, "\nHosted cluster %s\n", hosted.hosted)
+	if !hosted.recorded {
 		field(w, "Phase", "not created")
-		return nil
+		return
 	}
 	available := "unknown"
 	overrides := map[string]string{}
 	if ready {
-		_ = p.wait(ctx, "Checking the hosted cluster", func(ctx context.Context) error {
-			status, err := cluster.HostedClusterAvailable(ctx, kubeconfig, st.HostedCluster)
+		_ = p.wait(ctx, "Checking hosted cluster "+hosted.hosted, func(ctx context.Context) error {
+			status, err := cluster.HostedClusterAvailable(ctx, kubeconfig, hosted.hosted)
 			if err != nil {
 				available = "unknown (" + err.Error() + ")"
 				return nil
 			}
 			available = status
-			overrides = imageOverrides(ctx, cluster, kubeconfig, st.HostedCluster)
+			overrides = imageOverrides(ctx, cluster, kubeconfig, hosted.hosted)
 			return nil
 		})
 	}
-	printPhase(w, hosted, "hyperctl destroy hosted")
+	printPhase(w, hosted.record, "hyperctl destroy --cluster "+hosted.hosted)
 	field(w, "Available", available)
-	if hosted.Phase == phaseInstalled {
-		field(w, "Kubeconfig", clusters.kubeconfig(hostedRef))
+	if hosted.record.Phase == phaseInstalled {
+		field(w, "Kubeconfig", clusters.kubeconfig(hosted.clusterRef))
 	}
 	printImageOverrides(w, overrides)
-	return nil
 }
 
 // imageOverrides returns the image overrides by component name. Errors are

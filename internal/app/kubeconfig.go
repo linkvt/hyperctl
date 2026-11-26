@@ -8,25 +8,33 @@ import (
 	"strings"
 
 	"github.com/urfave/cli/v3"
-
-	"github.com/linkvt/hyperctl/internal/xdg"
 )
 
 func kubeconfigCommand(deps Deps) *cli.Command {
 	return &cli.Command{
-		Name:      "kubeconfig",
-		Usage:     "Print the kubeconfig paths of the hosted and management cluster, usable as KUBECONFIG",
-		ArgsUsage: "[hosted|mgmt]",
+		Name:  "kubeconfig",
+		Usage: "Print the kubeconfig path of the cluster, usable as KUBECONFIG: for a hosted cluster, or a management cluster with one hosted cluster, the hosted cluster's followed by the management cluster's",
+		Flags: []cli.Flag{clusterFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			dirs, err := xdg.Resolve("hyperctl")
+			if err := noArguments(cmd); err != nil {
+				return err
+			}
+			sel, err := selectCluster(cmd)
 			if err != nil {
 				return err
 			}
-			s, err := loadState(dirs.State)
-			if err != nil {
-				return err
+			c, required := sel.cluster.clusterRef, true
+			if !c.isHosted() {
+				switch hosted := sel.clusters.hosted(c.mgmt); len(hosted) {
+				case 0:
+				case 1:
+					c, required = hosted[0].clusterRef, false
+				default:
+					p := progress{w: cmd.Root().ErrWriter}
+					p.info("Hosted clusters of %s, select one with --cluster: %s", c.mgmt, strings.Join(hosted.names(), ", "))
+				}
 			}
-			kubeconfigs, err := selectKubeconfigs(ctx, deps.Cluster, dirs, s, cmd.Args().First())
+			kubeconfigs, err := selectKubeconfigs(ctx, deps.Cluster, sel.store, c, required)
 			if err != nil {
 				return err
 			}
@@ -49,55 +57,37 @@ type kubeconfigFile struct {
 	path    string
 }
 
-// selectKubeconfigs returns the kubeconfig of the hosted or management
-// cluster, or of both with the hosted cluster first, which makes it the
-// current context of a merged KUBECONFIG.
-func selectKubeconfigs(ctx context.Context, api ClusterAPI, dirs xdg.Dirs, s state, cluster string) ([]kubeconfigFile, error) {
-	if s.MgmtCluster == "" {
-		return nil, errors.New("no management cluster, run hyperctl create")
-	}
-	clusters := newClusterStore(dirs)
-	mgmt := kubeconfigFile{cluster: s.MgmtCluster, path: clusters.kubeconfig(managementCluster(s.MgmtCluster))}
-	hosted := kubeconfigFile{cluster: s.HostedCluster}
-	hostedExists := false
-	if s.HostedCluster != "" && (cluster == "" || cluster == "hosted") {
-		hosted.path = clusters.kubeconfig(hostedCluster(s.MgmtCluster, s.HostedCluster))
-		_, err := os.Stat(hosted.path)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return nil, err
-		}
-		hostedExists = err == nil
-		if !hostedExists {
-			content, err := api.HostedKubeconfig(ctx, mgmt.path, s.HostedCluster)
-			if err != nil {
-				return nil, err
-			}
-			if len(content) > 0 {
-				if err := writeFile(hosted.path, content); err != nil {
-					return nil, err
-				}
-				hostedExists = true
-			}
-		}
-	}
-
-	switch cluster {
-	case "":
-		if hostedExists {
-			return []kubeconfigFile{hosted, mgmt}, nil
-		}
+// selectKubeconfigs returns the kubeconfig of a management or standalone
+// cluster, or the ones of a hosted cluster and its management cluster with
+// the hosted cluster first, which makes it the current context of a merged
+// KUBECONFIG. The kubeconfig of a hosted cluster is fetched from its
+// management cluster once published. Until then, it fails if the hosted
+// cluster is required and leaves it out otherwise.
+func selectKubeconfigs(ctx context.Context, api ClusterAPI, clusters clusterStore, c clusterRef, required bool) ([]kubeconfigFile, error) {
+	mgmt := kubeconfigFile{cluster: c.mgmt, path: clusters.kubeconfig(managementCluster(c.mgmt))}
+	if !c.isHosted() {
 		return []kubeconfigFile{mgmt}, nil
-	case "hosted":
-		if !hostedExists {
-			if s.HostedCluster == "" {
-				return nil, errors.New("no hosted cluster, run hyperctl create")
-			}
-			return nil, errors.New("hosted kubeconfig not available yet")
-		}
-		return []kubeconfigFile{hosted}, nil
-	case "mgmt":
-		return []kubeconfigFile{mgmt}, nil
-	default:
-		return nil, fmt.Errorf("unknown cluster %q, expected hosted or mgmt", cluster)
 	}
+	hosted := kubeconfigFile{cluster: c.hosted, path: clusters.kubeconfig(c)}
+	_, err := os.Stat(hosted.path)
+	if err == nil {
+		return []kubeconfigFile{hosted, mgmt}, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	content, err := api.HostedKubeconfig(ctx, mgmt.path, c.hosted)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case len(content) == 0 && required:
+		return nil, errors.New("hosted kubeconfig not available yet")
+	case len(content) == 0:
+		return []kubeconfigFile{mgmt}, nil
+	}
+	if err := writeFile(hosted.path, content); err != nil {
+		return nil, err
+	}
+	return []kubeconfigFile{hosted, mgmt}, nil
 }

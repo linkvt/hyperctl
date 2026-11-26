@@ -147,6 +147,7 @@ func TestImageResetRemovesProviderOverride(t *testing.T) {
 
 func TestImageRequiresHostedCluster(t *testing.T) {
 	env := newTestEnv(t)
+	env.run(t, "create", "--setup", "management", "--release", "5.1.0-ec.0", "--region", "eu-central-1", "--name", "test-mgmt", "--pull-secret", env.pullSecret)
 
 	_, err := env.runErr(t, "image", "karpenter-operator", "quay.io/test/karpenter-operator:dev")
 

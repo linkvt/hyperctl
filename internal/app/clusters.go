@@ -1,9 +1,11 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/linkvt/hyperctl/internal/xdg"
@@ -77,6 +79,58 @@ func (c clusterRef) String() string {
 		return "hosted cluster " + c.hosted
 	}
 	return "management cluster " + c.mgmt
+}
+
+// name is the name of the cluster, unique among all clusters.
+func (c clusterRef) name() string {
+	if c.hosted != "" {
+		return c.hosted
+	}
+	return c.mgmt
+}
+
+func (c clusterRef) isHosted() bool {
+	return c.hosted != ""
+}
+
+// storedCluster is a cluster in the store: one with a record, or one whose
+// directory exists without record, as its creation never started.
+type storedCluster struct {
+	clusterRef
+	record   clusterRecord
+	recorded bool
+}
+
+// clusterList are the clusters in the store, each management cluster
+// followed by its hosted clusters, sorted by name.
+type clusterList []storedCluster
+
+// find returns the cluster with the name and whether it exists.
+func (l clusterList) find(name string) (storedCluster, bool) {
+	i := slices.IndexFunc(l, func(c storedCluster) bool { return c.name() == name })
+	if i < 0 {
+		return storedCluster{}, false
+	}
+	return l[i], true
+}
+
+// hosted returns the hosted clusters of a management cluster.
+func (l clusterList) hosted(mgmt string) clusterList {
+	var hosted clusterList
+	for _, c := range l {
+		if c.isHosted() && c.mgmt == mgmt {
+			hosted = append(hosted, c)
+		}
+	}
+	return hosted
+}
+
+func (l clusterList) names() []string {
+	var names []string
+	for _, c := range l {
+		names = append(names, c.name())
+	}
+	return names
 }
 
 // clusterStore keeps the records and files of the clusters in the data
@@ -175,6 +229,58 @@ func (s clusterStore) destroying(c clusterRef) (clusterRecord, bool, error) {
 // forget removes everything kept for a destroyed cluster.
 func (s clusterStore) forget(c clusterRef) error {
 	return os.RemoveAll(s.dir(c))
+}
+
+// track creates the directory of a cluster before anything else, so that
+// the cluster exists even if its creation stops before the record.
+func (s clusterStore) track(c clusterRef) error {
+	return os.MkdirAll(s.dir(c), 0o700)
+}
+
+// list returns the clusters with a record or a directory.
+func (s clusterStore) list() (clusterList, error) {
+	mgmts, err := s.listDir(s.root)
+	if err != nil {
+		return nil, err
+	}
+	var clusters clusterList
+	for _, mgmt := range mgmts {
+		hosteds, err := s.listDir(filepath.Join(s.root, mgmt, "hosted"))
+		if err != nil {
+			return nil, err
+		}
+		refs := []clusterRef{managementCluster(mgmt)}
+		for _, hosted := range hosteds {
+			refs = append(refs, hostedCluster(mgmt, hosted))
+		}
+		for _, c := range refs {
+			record, found, err := s.load(c)
+			if err != nil {
+				return nil, err
+			}
+			clusters = append(clusters, storedCluster{clusterRef: c, record: record, recorded: found})
+		}
+	}
+	return clusters, nil
+}
+
+// listDir returns the names of the directories in dir, sorted, and none if
+// dir does not exist.
+func (s clusterStore) listDir(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return names, nil
 }
 
 // load returns the record of a cluster and whether it exists.

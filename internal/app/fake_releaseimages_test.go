@@ -42,6 +42,8 @@ type fakeReleaseImages struct {
 	installErr error
 	creates    []installerCall
 	destroys   []installerCall
+	// beforeDestroy runs before a cluster is destroyed.
+	beforeDestroy func()
 }
 
 // pullCheck is a release image pull check.
@@ -109,6 +111,9 @@ func (f *fakeReleaseImages) CreateCluster(_ context.Context, installer ocp.Insta
 }
 
 func (f *fakeReleaseImages) DestroyCluster(_ context.Context, installer ocp.Installer, installDir string, _ io.Writer) error {
+	if f.beforeDestroy != nil {
+		f.beforeDestroy()
+	}
 	f.destroys = append(f.destroys, installerCall{installDir: installDir})
 	return nil
 }

@@ -11,9 +11,10 @@ import (
 
 // state is what hyperctl remembers between runs.
 type state struct {
-	MgmtCluster   string `json:"mgmtCluster,omitempty"`
-	HostedCluster string `json:"hostedCluster,omitempty"`
-	LastRelease   string `json:"lastRelease,omitempty"`
+	// Current is the name of the cluster that commands act on unless
+	// --cluster names one.
+	Current     string `json:"current,omitempty"`
+	LastRelease string `json:"lastRelease,omitempty"`
 	// Setup is the last used setup.
 	Setup setup `json:"setup,omitempty"`
 	// LastRegions are the regions of the last created clusters, the default
@@ -33,7 +34,15 @@ func loadState(stateDir string) (state, error) {
 	return s, err
 }
 
-func saveState(stateDir string, s state) error {
+// updateState applies change to the saved state. It reads the state again
+// instead of saving a copy loaded earlier, so that concurrent runs keep each
+// other's changes.
+func updateState(stateDir string, change func(*state)) error {
+	s, err := loadState(stateDir)
+	if err != nil {
+		return err
+	}
+	change(&s)
 	return writeYAML(filepath.Join(stateDir, "state.yaml"), s)
 }
 

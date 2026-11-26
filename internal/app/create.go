@@ -111,13 +111,15 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if err != nil {
 		return err
 	}
-	if err := requireTrackedClusters(st, opts); err != nil {
+	if err := requireTrackedClusters(clusters, st, opts); err != nil {
 		return err
 	}
-	st.LastRelease = cmp.Or(opts.Release, st.LastRelease)
-	st.Setup = opts.Setup
-	run.rememberRegion(&st, opts.Region)
-	if err := saveState(dirs.State, st); err != nil {
+	err = updateState(dirs.State, func(st *state) {
+		st.LastRelease = cmp.Or(opts.Release, st.LastRelease)
+		st.Setup = opts.Setup
+		run.rememberRegion(st, opts.Region)
+	})
+	if err != nil {
 		return err
 	}
 
@@ -127,8 +129,7 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 
 	// Track the clusters before creating them, so that incomplete ones can
 	// be destroyed.
-	st.MgmtCluster = opts.Name
-	if err := saveState(dirs.State, st); err != nil {
+	if err := trackCurrent(dirs, clusters, managementCluster(opts.Name)); err != nil {
 		return err
 	}
 	p.step("%s %s", setup.clusterTitle(), opts.Name)
@@ -149,10 +150,6 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	}
 
 	if setup.hosted() {
-		st.HostedCluster = opts.HostedName
-		if err := saveState(dirs.State, st); err != nil {
-			return err
-		}
 		p.step("Hosted cluster %s", opts.HostedName)
 		if err := run.createHosted(ctx, p, hs, opts); err != nil {
 			return err
@@ -164,16 +161,51 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	return nil
 }
 
-// requireTrackedClusters fails if create would replace a tracked cluster, as
-// only one management and one hosted cluster are supported.
-func requireTrackedClusters(st state, opts createOptions) error {
-	if st.MgmtCluster != "" && st.MgmtCluster != opts.Name {
-		return fmt.Errorf("management cluster %s exists, destroy it first", st.MgmtCluster)
+// trackCurrent makes a cluster about to be created the current cluster. Its
+// directory is created first, so that the current cluster exists even if
+// the creation stops before the record is saved.
+func trackCurrent(dirs xdg.Dirs, clusters clusterStore, c clusterRef) error {
+	if err := clusters.track(c); err != nil {
+		return err
 	}
-	if opts.Setup.hosted() && st.HostedCluster != "" && st.HostedCluster != opts.HostedName {
-		return fmt.Errorf("hosted cluster %s exists, destroy it first", st.HostedCluster)
+	return updateState(dirs.State, func(st *state) {
+		st.Current = c.name()
+	})
+}
+
+// requireTrackedClusters fails if create would replace the current
+// clusters, as only one management and one hosted cluster are supported.
+func requireTrackedClusters(clusters clusterStore, st state, opts createOptions) error {
+	current, found, err := currentCluster(clusters, st)
+	if err != nil || !found {
+		return err
+	}
+	if current.mgmt != opts.Name {
+		return fmt.Errorf("management cluster %s exists, destroy it first", current.mgmt)
+	}
+	if !opts.Setup.hosted() {
+		return nil
+	}
+	list, err := clusters.list()
+	if err != nil {
+		return err
+	}
+	for _, hosted := range list.hosted(current.mgmt) {
+		if hosted.hosted != opts.HostedName {
+			return fmt.Errorf("hosted cluster %s exists, destroy it first", hosted.hosted)
+		}
 	}
 	return nil
+}
+
+// currentCluster returns the current cluster and whether it exists.
+func currentCluster(clusters clusterStore, st state) (clusterRef, bool, error) {
+	list, err := clusters.list()
+	if err != nil || st.Current == "" {
+		return clusterRef{}, false, err
+	}
+	c, found := list.find(st.Current)
+	return c.clusterRef, found, nil
 }
 
 // resolveCreateOptions takes values from flags, prompts for missing ones if it
@@ -319,16 +351,24 @@ func defaultCreateOptions(clusters clusterStore, st state, cfg config, run platf
 	if cfg.SSHKey != nil {
 		opts.SSHKey = *cfg.SSHKey
 	}
-	if st.MgmtCluster == "" {
-		return opts, nil
+	current, found, err := currentCluster(clusters, st)
+	if err != nil || !found {
+		return opts, err
+	}
+	list, err := clusters.list()
+	if err != nil {
+		return opts, err
 	}
 
-	// A tracked management cluster determines the settings of its hosted
+	// The current management cluster determines the settings of its hosted
 	// cluster. A cluster without the HyperShift operator may not have
 	// recorded all of them.
-	opts.Name = st.MgmtCluster
-	opts.HostedName = st.HostedCluster
-	record, found, err := clusters.load(managementCluster(st.MgmtCluster))
+	opts.Name = current.mgmt
+	opts.HostedName = current.hosted
+	if hosted := list.hosted(current.mgmt); opts.HostedName == "" && len(hosted) == 1 {
+		opts.HostedName = hosted[0].hosted
+	}
+	record, found, err := clusters.load(managementCluster(current.mgmt))
 	if err != nil || !found {
 		return opts, err
 	}
