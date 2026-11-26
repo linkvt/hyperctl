@@ -6,21 +6,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/linkvt/hyperctl/internal/hypershift"
 	"github.com/linkvt/hyperctl/internal/ocp"
 	"github.com/linkvt/hyperctl/internal/releases"
 	"github.com/linkvt/hyperctl/internal/xdg"
 )
 
-const defaultBaseDomain = "autoscaling-dev.devcluster.openshift.com"
-
-// createOptions are the values needed to create the clusters.
+// createOptions are the values needed to create the clusters on every
+// platform, the platformCreate holds the others.
 type createOptions struct {
 	Release        string
 	Region         string
@@ -28,19 +25,12 @@ type createOptions struct {
 	Name           string
 	PullSecret     string
 	SSHKey         string
-	OIDCBucket     string
 	HostedName     string
 	ManagementOnly bool
-	// Platform is platformAWS or platformAzure.
-	Platform string
 	// StandaloneKarpenterOperator installs the HyperShift operator so that
 	// hosted clusters run the standalone karpenter-operator instead of the one
 	// embedded in the HyperShift image.
 	StandaloneKarpenterOperator bool
-	// InstanceType and Workers size the management cluster, see mgmtSize. On
-	// Azure they are the VM size and number of the AKS nodes.
-	InstanceType string
-	Workers      int
 }
 
 func createCommand(deps Deps) *cli.Command {
@@ -50,19 +40,19 @@ func createCommand(deps Deps) *cli.Command {
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "release", Usage: "OCP release version, e.g. 5.1.0-ec.0, or release image pull spec (default: last used)"},
 			&cli.StringFlag{Name: "platform", Usage: "Cloud platform of the clusters, aws or azure (default: last used, or aws)"},
-			&cli.StringFlag{Name: "region", Usage: "AWS region or Azure location, e.g. westus3 or germanywestcentral (default: AWS profile region, last used Azure location, or " + defaultAzureLocation + ")"},
+			&cli.StringFlag{Name: "region", Usage: "AWS region or Azure location, e.g. westus3 or germanywestcentral (default: last used, AWS profile region or " + defaultAzureLocation + ")"},
 			&cli.StringFlag{Name: "base-domain", Usage: "Base domain with a public DNS zone (default: " + defaultBaseDomain + ", on Azure " + defaultAzureBaseDomain + ")"},
 			&cli.StringFlag{Name: "name", Usage: "Management cluster name (default: $USER-karpenter)"},
 			&cli.StringFlag{Name: "pull-secret", Usage: "Path to the pull secret file (default: ~/.openshift/pull-secret-latest.json)"},
 			&cli.StringFlag{Name: "ssh-key", Usage: "Path to an SSH public key for node access (optional)"},
 			&cli.BoolFlag{Name: "yes", Usage: "Do not ask for confirmation, also not for deleting DNS leftovers of previous clusters"},
 			&cli.BoolFlag{Name: "management-only", Usage: "Create the management cluster and install the HyperShift operator without creating a hosted cluster"},
-			&cli.BoolFlag{Name: "standalone-karpenter-operator", Value: true, Usage: "Run the standalone karpenter-operator in hosted clusters, =false runs the one embedded in the HyperShift operator image"},
+			&cli.BoolFlag{Name: "standalone-karpenter-operator", Value: true, Usage: "Run the standalone karpenter-operator in hosted clusters, =false (AWS only) runs the one embedded in the HyperShift operator image"},
 			&cli.StringFlag{Name: "hosted-name", Usage: "Hosted cluster name (default: <name>-workload)"},
-			&cli.StringFlag{Name: "instance-type", Usage: "EC2 instance type or Azure VM size of the management cluster nodes (default: " + defaultInstanceType + ", on Azure " + defaultAzureVMSize + ")"},
-			&cli.IntFlag{Name: "workers", Usage: "Worker nodes of the management cluster, on Azure the number of AKS nodes (default: 1, on Azure 3; 0 disables workers on AWS)"},
+			&cli.StringFlag{Name: "instance-type", Usage: "EC2 instance type or Azure VM size of the management cluster nodes (default: " + defaultSize.InstanceType + ", on Azure " + defaultAzureVMSize + ")"},
+			&cli.IntFlag{Name: "workers", Usage: "Worker nodes of the management cluster, on Azure the number of AKS nodes (default: 3; on AWS 0 or 1 runs a compact cluster in one zone)"},
 			&cli.StringFlag{Name: "hypershift", Usage: "Path to the hypershift binary (default: from PATH)"},
-			&cli.StringFlag{Name: "oidc-bucket", Usage: "S3 bucket for OIDC discovery documents, created if missing (default: $USER-hypershift-oidc)"},
+			&cli.StringFlag{Name: "oidc-bucket", Usage: "S3 bucket for OIDC discovery documents on AWS, created if missing (default: $USER-hypershift-oidc)"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return runCreate(ctx, cmd, deps)
@@ -85,36 +75,30 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if err != nil {
 		return err
 	}
-	platform, err := resolvePlatform(ctx, p, cmd, deps, dirs, st)
+	clusters := newClusterStore(dirs)
+	platformName, err := resolvePlatform(ctx, p, cmd, deps, clusters, st)
 	if err != nil {
 		return err
 	}
-	if platform == platformAzure {
-		return runCreateAzure(ctx, p, cmd, deps, dirs, st, cfg)
+	platform, err := newPlatform(platformName, deps, dirs, clusters)
+	if err != nil {
+		return err
+	}
+	run, err := platform.newCreate(cmd, st, cfg)
+	if err != nil {
+		return err
 	}
 
-	var identity string
-	err = p.wait(ctx, "Checking the AWS identity", func(ctx context.Context) error {
-		var err error
-		identity, err = requireIAMUser(ctx, deps.AWS)
-		return err
-	})
-	if err != nil {
+	if err := run.checkAccount(ctx, p); err != nil {
 		return err
 	}
-	p.done("AWS identity %s", identity)
 	hypershiftPath, err := resolveHypershift(ctx, cmd, deps, dirs, cfg)
 	if err != nil {
 		return err
 	}
 	p.done("hypershift %s", hypershiftPath)
-	credentialsFile, err := awsCredentialsFile()
-	if err != nil {
-		return err
-	}
-	p.done("AWS credentials file %s", credentialsFile)
 
-	opts, err := resolveCreateOptions(ctx, p, cmd, deps, dirs, st, cfg, platformAWS)
+	opts, err := resolveCreateOptions(ctx, p, cmd, deps, dirs, clusters, st, cfg, platformName, run)
 	if err != nil {
 		return err
 	}
@@ -123,20 +107,12 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	}
 	st.LastRelease = opts.Release
 	st.ManagementOnly = opts.ManagementOnly
+	run.rememberRegion(&st, opts.Region)
 	if err := saveState(dirs.State, st); err != nil {
 		return err
 	}
 
-	p.step("Checking the AWS account")
-	oidcBucketRegion, err := ensureAWSPrerequisites(ctx, p, deps.AWS, opts)
-	if err != nil {
-		return err
-	}
-	untracked, err := untrackedClusterNames(dirs, opts)
-	if err != nil {
-		return err
-	}
-	if err := deleteDNSLeftovers(ctx, p, deps, cmd.Bool("yes"), opts.BaseDomain, untracked...); err != nil {
+	if err := run.prepare(ctx, p, opts); err != nil {
 		return err
 	}
 
@@ -147,23 +123,15 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 		return err
 	}
 	p.step("Management cluster %s", opts.Name)
-	if err := ensureMgmtCluster(ctx, p, deps, dirs, opts); err != nil {
+	if err := run.createMgmt(ctx, p, opts); err != nil {
 		return err
 	}
 
 	p.step("HyperShift operator")
-	hs := deps.Hypershift(hypershiftPath, newClusterStore(dirs).kubeconfig(managementCluster(opts.Name)), p.tool("hypershift"))
-	start := time.Now()
-	if err := hs.Install(ctx, hypershift.InstallParams{
-		OIDCBucket:         opts.OIDCBucket,
-		OIDCBucketRegion:   oidcBucketRegion,
-		AWSCredentialsFile: credentialsFile,
-
-		StandaloneKarpenterOperator: opts.StandaloneKarpenterOperator,
-	}); err != nil {
+	hs := deps.Hypershift(hypershiftPath, clusters.kubeconfig(managementCluster(opts.Name)), p.tool("hypershift"))
+	if err := run.installOperator(ctx, p, hs, opts); err != nil {
 		return err
 	}
-	p.done("Installed the HyperShift operator (%s)", since(start))
 
 	if !opts.ManagementOnly {
 		st.HostedCluster = opts.HostedName
@@ -171,7 +139,7 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 			return err
 		}
 		p.step("Hosted cluster %s", opts.HostedName)
-		if err := ensureHostedCluster(ctx, p, hs, dirs, opts); err != nil {
+		if err := run.createHosted(ctx, p, hs, opts); err != nil {
 			return err
 		}
 	}
@@ -193,80 +161,38 @@ func requireTrackedClusters(st state, opts createOptions) error {
 	return nil
 }
 
-// untrackedClusterNames returns the names of the clusters to create that
-// hyperctl has no record of. DNS entries with these names are leftovers.
-func untrackedClusterNames(dirs xdg.Dirs, opts createOptions) ([]string, error) {
-	clusters := newClusterStore(dirs)
-	candidates := map[string]clusterRef{opts.Name: managementCluster(opts.Name)}
-	if !opts.ManagementOnly {
-		candidates[opts.HostedName] = hostedCluster(opts.Name, opts.HostedName)
-	}
-	var names []string
-	for name, c := range candidates {
-		_, found, err := clusters.load(c)
-		if err != nil {
-			return nil, err
-		}
-		if !found {
-			names = append(names, name)
-		}
-	}
-	slices.Sort(names)
-	return names, nil
-}
-
-// awsCredentialsFile returns the AWS shared credentials file the HyperShift
-// operator uses to write OIDC documents. The operator reads its default
-// profile.
-func awsCredentialsFile() (string, error) {
-	path := os.Getenv("AWS_SHARED_CREDENTIALS_FILE")
-	if path == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		path = filepath.Join(home, ".aws", "credentials")
-	}
-	if _, err := os.Stat(path); err != nil {
-		return "", fmt.Errorf("AWS credentials file for the HyperShift operator: %w", err)
-	}
-	return path, nil
-}
-
 // resolveCreateOptions takes values from flags, prompts for missing ones when
 // interactive and falls back to defaults otherwise. The SSH key is only asked
 // once and then saved to the config file.
-func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, deps Deps, dirs xdg.Dirs, st state, cfg config, platform string) (createOptions, error) {
-	defaults, err := defaultCreateOptions(deps, dirs, st, cfg, platform)
+func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, deps Deps, dirs xdg.Dirs, clusters clusterStore, st state, cfg config, platformName string, run platformCreate) (createOptions, error) {
+	defaults, err := defaultCreateOptions(clusters, st, cfg, run)
 	if err != nil {
 		return createOptions{}, err
 	}
 	opts := createOptions{
-		Platform:       platform,
 		Release:        flagOr(cmd, "release", defaults.Release),
 		Region:         flagOr(cmd, "region", defaults.Region),
 		BaseDomain:     flagOr(cmd, "base-domain", defaults.BaseDomain),
 		Name:           flagOr(cmd, "name", defaults.Name),
 		PullSecret:     flagOr(cmd, "pull-secret", defaults.PullSecret),
 		SSHKey:         flagOr(cmd, "ssh-key", defaults.SSHKey),
-		OIDCBucket:     flagOr(cmd, "oidc-bucket", defaults.OIDCBucket),
 		HostedName:     flagOr(cmd, "hosted-name", defaults.HostedName),
 		ManagementOnly: defaults.ManagementOnly,
-		InstanceType:   flagOr(cmd, "instance-type", defaults.InstanceType),
-		Workers:        defaults.Workers,
 
 		StandaloneKarpenterOperator: cmd.Bool("standalone-karpenter-operator"),
-	}
-	if cmd.IsSet("workers") {
-		opts.Workers = cmd.Int("workers")
 	}
 	if cmd.IsSet("management-only") {
 		opts.ManagementOnly = cmd.Bool("management-only")
 	}
 	if deps.Interactive {
 		askSSHKey := !cmd.IsSet("ssh-key") && cfg.SSHKey == nil
-		if err := promptCreateOptions(ctx, p, cmd, releases.Client{BaseURL: deps.ReleasesURL}, &opts, askSSHKey, !cmd.Bool("yes")); err != nil {
+		if err := promptCreateOptions(ctx, p, cmd, releases.Client{BaseURL: deps.ReleasesURL}, run, &opts, askSSHKey); err != nil {
 			return createOptions{}, err
+		}
+		if !cmd.Bool("yes") {
+			if err := confirmCreateOptions(ctx, platformName, run, opts); err != nil {
+				return createOptions{}, err
+			}
 		}
 		if askSSHKey {
 			cfg.SSHKey = &opts.SSHKey
@@ -292,10 +218,6 @@ func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, dep
 		{"--base-domain", opts.BaseDomain},
 		{"--name", opts.Name},
 		{"--pull-secret", opts.PullSecret},
-		{"--instance-type", opts.InstanceType},
-	}
-	if platform == platformAWS {
-		required = append(required, struct{ flag, value string }{"--oidc-bucket", opts.OIDCBucket})
 	}
 	var missing []string
 	for _, r := range required {
@@ -303,6 +225,7 @@ func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, dep
 			missing = append(missing, r.flag)
 		}
 	}
+	missing = append(missing, run.missing()...)
 	if len(missing) > 0 {
 		return createOptions{}, fmt.Errorf("missing required values: %s", strings.Join(missing, ", "))
 	}
@@ -358,7 +281,7 @@ func loginHint(registry, pullSecret string) string {
 
 // defaultCreateOptions returns the built-in defaults, overridden by the
 // config file, the last used release and the tracked clusters.
-func defaultCreateOptions(deps Deps, dirs xdg.Dirs, st state, cfg config, platform string) (createOptions, error) {
+func defaultCreateOptions(clusters clusterStore, st state, cfg config, run platformCreate) (createOptions, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return createOptions{}, err
@@ -366,28 +289,12 @@ func defaultCreateOptions(deps Deps, dirs xdg.Dirs, st state, cfg config, platfo
 	opts := createOptions{
 		ManagementOnly: st.ManagementOnly,
 		Release:        st.LastRelease,
-		Region:         cmp.Or(cfg.Region, deps.DefaultRegion),
-		BaseDomain:     cmp.Or(cfg.BaseDomain, defaultBaseDomain),
+		Region:         run.defaultRegion(),
+		BaseDomain:     run.defaultBaseDomain(),
 		PullSecret:     cmp.Or(cfg.PullSecret, filepath.Join(home, ".openshift", "pull-secret-latest.json")),
-		OIDCBucket:     cfg.OIDCBucket,
-		InstanceType:   cmp.Or(cfg.MgmtInstanceType, defaultInstanceType),
-		Workers:        compactWorkerCount,
-	}
-	if cfg.MgmtWorkers != nil {
-		opts.Workers = *cfg.MgmtWorkers
-	}
-	if platform == platformAzure {
-		opts.Region = cmp.Or(cfg.Azure.Location, defaultAzureLocation)
-		opts.BaseDomain = cmp.Or(cfg.Azure.BaseDomain, defaultAzureBaseDomain)
-		opts.OIDCBucket = ""
-		opts.InstanceType = cmp.Or(cfg.Azure.MgmtVMSize, defaultAzureVMSize)
-		opts.Workers = cmp.Or(cfg.Azure.MgmtNodes, defaultAKSNodes)
 	}
 	if user := os.Getenv("USER"); user != "" {
 		opts.Name = user + "-karpenter"
-		if platform == platformAWS {
-			opts.OIDCBucket = cmp.Or(opts.OIDCBucket, user+"-hypershift-oidc")
-		}
 	}
 	if cfg.SSHKey != nil {
 		opts.SSHKey = *cfg.SSHKey
@@ -400,7 +307,7 @@ func defaultCreateOptions(deps Deps, dirs xdg.Dirs, st state, cfg config, platfo
 	// cluster.
 	opts.Name = st.MgmtCluster
 	opts.HostedName = st.HostedCluster
-	record, found, err := newClusterStore(dirs).load(managementCluster(st.MgmtCluster))
+	record, found, err := clusters.load(managementCluster(st.MgmtCluster))
 	if err != nil || !found {
 		return opts, err
 	}

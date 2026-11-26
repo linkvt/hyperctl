@@ -62,7 +62,7 @@ Re-running `create` skips an installed management cluster.
 If hosted-cluster creation fails, clean up only that cluster with `hyperctl destroy hosted` before retrying; the management cluster remains installed.
 
 1. Check the AWS account: IAM user credentials, EC2 Spot service-linked role, OIDC bucket (created and made public-readable if missing), DNS leftovers
-2. Install the management cluster with `openshift-install` (about 45 minutes), by default as 3 control-plane and 1 worker `t3a.xlarge` nodes in one zone
+2. Install the management cluster with `openshift-install` (about 45 minutes), by default as 3 control-plane and 3 worker `m6i.xlarge` nodes across the zones of the region, the size openshift-install uses by default; the size prompt also offers compact clusters with 1 worker in one zone
 3. Install the HyperShift operator, by default with the standalone karpenter-operator (`--enable-standalone-karpenter-operator`).
    Use `--standalone-karpenter-operator=false` for the one embedded in the HyperShift operator image.
    The `hyperctl image karpenter-operator` override only applies to the standalone one.
@@ -70,14 +70,14 @@ If hosted-cluster creation fails, clean up only that cluster with `hyperctl dest
 4. Unless management-only mode is selected, create the AutoNode hosted cluster and write its kubeconfig
 
 `hyperctl create --help` lists all flags and defaults.
-Set `--workers=0` to install a three-node compact management cluster without a worker.
+Set `--workers=1` or `--workers=0` to install a compact management cluster in one zone, with one or without a worker.
 
 | Command | Purpose |
 |---|---|
 | `hyperctl create` | Create the management cluster and optionally its hosted cluster, skipping an installed management cluster |
 | `hyperctl status` | Show the clusters, whether the management cluster responds and the hosted cluster is available |
 | `hyperctl kubeconfig [hosted\|mgmt]` | Print the kubeconfig paths of both clusters for `KUBECONFIG`, or of one |
-| `hyperctl destroy [all\|hosted\|shared]` | Destroy the hosted and, by default, the management cluster, or the shared Azure resources |
+| `hyperctl destroy [all\|hosted\|shared]` | Destroy the hosted and, by default, the management cluster, or with `shared --platform aws\|azure` the shared resources of a platform |
 | `hyperctl image karpenter-operator\|karpenter-provider <image>` | Override the Karpenter operator or Karpenter provider image of the hosted cluster (`--reset` to remove) |
 | `hyperctl releases [stream]` | List release streams or the accepted releases of a stream (`--all` for all) |
 | `hyperctl cache clean` | Remove cached installer binaries |
@@ -97,9 +97,9 @@ Instances of stopped clusters get pruned, which leaves broken clusters and Route
 `create --platform azure` creates an AKS management cluster and an Azure hosted cluster with AutoNode, following a verified manual setup.
 An existing management cluster determines the platform and `create` reports it; otherwise `create` asks for it.
 
-1. Check the Azure login (`az account show`) and that the location offers the node VM size, by default `Standard_D4s_v5`, without restrictions; the location defaults to `westus3`
+1. Check the Azure login (`az account show`) and that the location offers the node VM size, by default `Standard_D4s_v5`, without restrictions; the location defaults to the last used one, or `westus3`
 2. Create or reuse the resources that all clusters share, see below
-3. Create an AKS cluster with 3 nodes in 2 zones in resource group `<name>-rg` (about 10 minutes)
+3. Create an AKS cluster in 2 zones in resource group `<name>-rg` (about 10 minutes); the size prompt offers 3 nodes `Standard_D4s_v5`, as in hypershift's AKS setup script, and the size from the config file
 4. Install the Prometheus and Route CRDs and the HyperShift operator with External DNS and the standalone karpenter-operator, which Azure AutoNode requires
 5. Create the workload identities (`hypershift create iam azure --enable-karpenter`) and infrastructure (`hypershift create infra azure`), assign the roles of the workload identities, and create the hosted cluster with 2 workers
 
@@ -117,7 +117,8 @@ Shared resources, created when missing on every `create` and kept when destroyin
 | Service principal of External DNS with Reader and Contributor on its zone | `$USER-hyperctl-external-dns` |
 
 The service principal credentials and the signing key are kept in `~/.local/share/hyperctl/azure`.
-`hyperctl destroy shared` deletes all of them once no management cluster is left.
+`hyperctl destroy shared --platform azure` deletes all of them once no Azure management cluster is left.
+On AWS, `destroy shared --platform aws` deletes nothing: the OIDC bucket is kept, and the EC2 Spot service-linked role belongs to the whole account.
 
 `destroy` runs `hypershift destroy cluster azure`, which deletes the HostedCluster and the resource groups of the hosted cluster (`hypershift destroy infra azure` if the management cluster is unreachable). hyperctl then deletes the External DNS records, the `*.apps` record of the hosted cluster in the base domain zone (only if owned by its infra ID) and the role assignment of the ingress identity on that zone, runs `hypershift destroy iam azure` for the workload identities and deletes the resource group of the AKS cluster.
 
@@ -131,10 +132,11 @@ hyperctl follows the XDG Base Directory Specification on macOS and Linux:
 |---|---|---|
 | Config | `~/.config/hyperctl/config.yaml` | User defaults, see below |
 | Data | `~/.local/share/hyperctl` | Installer directories, hosted cluster kubeconfigs, needed to destroy clusters |
-| State | `~/.local/state/hyperctl` | Current cluster, last used release |
+| State | `~/.local/state/hyperctl` | Current cluster, last used release and regions |
 | Cache | `~/.cache/hyperctl` | `openshift-install` binaries per release |
 
 Config values override built-in defaults, flags override config values.
+Without a region in the config, `create` uses the last used region of the platform.
 The SSH key is asked once and saved; `sshKey: ""` disables it.
 
 ```yaml
@@ -147,7 +149,7 @@ oidcBucket: myuser-hypershift-oidc
 mgmtInstanceType: t3a.xlarge
 mgmtWorkers: 0
 hypershift: ~/repos/openshift/hypershift/bin/hypershift
-# Azure clusters, location is saved after each create
+# Azure clusters
 azure:
   location: germanywestcentral
   baseDomain: azure.autoscaling-dev.devcluster.openshift.com

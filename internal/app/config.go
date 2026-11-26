@@ -25,7 +25,7 @@ type config struct {
 
 // azureConfig holds user defaults for Azure clusters.
 type azureConfig struct {
-	// Location is saved after each create.
+	// Location is the default location, before the last used one.
 	Location   string `json:"location,omitempty"`
 	BaseDomain string `json:"baseDomain,omitempty"`
 	// BaseDomainResourceGroup holds the public DNS zone of the base domain.

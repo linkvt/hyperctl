@@ -15,13 +15,16 @@ type state struct {
 	HostedCluster  string `json:"hostedCluster,omitempty"`
 	LastRelease    string `json:"lastRelease,omitempty"`
 	ManagementOnly bool   `json:"managementOnly,omitempty"`
+	// LastRegions are the regions of the last created clusters, the default
+	// unless the config file sets one.
+	LastRegions lastRegions `json:"lastRegions,omitzero"`
 }
 
-// Platforms of the clusters.
-const (
-	platformAWS   = "aws"
-	platformAzure = "azure"
-)
+// lastRegions holds the last used region per platform.
+type lastRegions struct {
+	AWS   string `json:"aws,omitempty"`
+	Azure string `json:"azure,omitempty"`
+}
 
 func loadState(stateDir string) (state, error) {
 	var s state

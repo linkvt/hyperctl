@@ -37,6 +37,8 @@ type fakeAzure struct {
 	aksClusters []azureaccount.AKSClusterParams
 	// createAKSClusterErr fails creating AKS clusters.
 	createAKSClusterErr error
+	// subscriptionErr fails the Azure login check.
+	subscriptionErr error
 }
 
 type fakeRoleAssignment struct {
@@ -67,6 +69,9 @@ func newFakeAzure() *fakeAzure {
 }
 
 func (f *fakeAzure) Subscription(context.Context) (azureaccount.Subscription, error) {
+	if f.subscriptionErr != nil {
+		return azureaccount.Subscription{}, f.subscriptionErr
+	}
 	return azureaccount.Subscription{ID: testSubscriptionID, Name: "Test Subscription", TenantID: testTenantID}, nil
 }
 

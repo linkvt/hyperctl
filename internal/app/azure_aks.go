@@ -3,16 +3,34 @@ package app
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
+	"github.com/charmbracelet/huh"
+
 	"github.com/linkvt/hyperctl/internal/azureaccount"
-	"github.com/linkvt/hyperctl/internal/xdg"
 )
+
+const (
+	defaultAzureVMSize = "Standard_D4s_v5"
+	defaultAKSNodes    = 3
+	// aksZones is the number of zones the AKS nodes are spread across.
+	aksZones = 2
+)
+
+// aksSize is the size of an AKS management cluster.
+type aksSize struct {
+	VMSize string
+	Nodes  int
+}
+
+// aksSizePresets are the sizes offered in the prompt, the first one as in
+// hypershift's contrib/managed-azure/setup_aks_cluster.sh.
+var aksSizePresets = []aksSize{{defaultAzureVMSize, defaultAKSNodes}}
 
 // ensureAKSCluster creates the AKS management cluster unless it is
 // installed, tracking progress in the cluster record.
-func ensureAKSCluster(ctx context.Context, p progress, account AzureAccount, dirs xdg.Dirs, opts createOptions, zones []string) error {
-	clusters := newClusterStore(dirs)
+func ensureAKSCluster(ctx context.Context, p progress, account AzureAccount, clusters clusterStore, opts createOptions, size aksSize, zones []string) error {
 	c := managementCluster(opts.Name)
 	installed, err := clusters.check(c)
 	if err != nil {
@@ -42,8 +60,8 @@ func ensureAKSCluster(ctx context.Context, p progress, account AzureAccount, dir
 			ResourceGroup: resourceGroup,
 			Name:          opts.Name,
 			Location:      opts.Region,
-			VMSize:        opts.InstanceType,
-			Nodes:         opts.Workers,
+			VMSize:        size.VMSize,
+			Nodes:         size.Nodes,
 			Zones:         zones,
 		})
 	})
@@ -64,6 +82,32 @@ func ensureAKSCluster(ctx context.Context, p progress, account AzureAccount, dir
 	return nil
 }
 
+// describe describes the size for the summary.
+func (s aksSize) describe() string {
+	return fmt.Sprintf("AKS with %d nodes %s", s.Nodes, s.VMSize)
+}
+
+// promptAKSSize lets the user pick an AKS management cluster size.
+func promptAKSSize(ctx context.Context, size *aksSize) error {
+	var options []huh.Option[aksSize]
+	for _, s := range aksSizeChoices(*size) {
+		options = append(options, huh.NewOption(fmt.Sprintf("%d nodes %s", s.Nodes, s.VMSize), s))
+	}
+	return huh.NewForm(huh.NewGroup(
+		huh.NewSelect[aksSize]().Title("Management cluster size").Options(options...).Value(size),
+	)).RunWithContext(ctx)
+}
+
+// aksSizeChoices returns the presets and the current size, e.g. from the
+// config file, unless it is a preset.
+func aksSizeChoices(current aksSize) []aksSize {
+	choices := slices.Clone(aksSizePresets)
+	if !slices.Contains(choices, current) {
+		choices = append(choices, current)
+	}
+	return choices
+}
+
 // aksResourceGroup holds the AKS cluster of a management cluster.
 func aksResourceGroup(name string) string {
 	return name + "-rg"
@@ -71,8 +115,7 @@ func aksResourceGroup(name string) string {
 
 // destroyAKSCluster deletes the resource group of the AKS management cluster
 // and the node resource group Azure manages for it.
-func destroyAKSCluster(ctx context.Context, p progress, account AzureAccount, dirs xdg.Dirs, name string) error {
-	clusters := newClusterStore(dirs)
+func destroyAKSCluster(ctx context.Context, p progress, account AzureAccount, clusters clusterStore, name string) error {
 	c := managementCluster(name)
 	record, found, err := clusters.destroying(c)
 	if err != nil {

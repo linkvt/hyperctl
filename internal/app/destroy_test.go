@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -266,4 +267,54 @@ func (e *testEnv) hostedInfraID(t *testing.T) string {
 	}
 	t.Fatal("no hosted cluster created")
 	return ""
+}
+
+func TestDestroySharedAWSResources(t *testing.T) {
+	env := newTestEnv(t)
+
+	out := env.run(t, "destroy", "shared", "--platform", "aws", "--yes")
+
+	if !strings.Contains(out, "No shared AWS resources to destroy") {
+		t.Errorf("expected nothing to destroy, got:\n%s", out)
+	}
+	if len(env.azure.deletedApplications)+len(env.azure.deletedResourceGroups) != 0 {
+		t.Errorf("expected no Azure resources deleted, got %v and %v", env.azure.deletedApplications, env.azure.deletedResourceGroups)
+	}
+}
+
+func TestDestroySharedRequiresPlatform(t *testing.T) {
+	env := newTestEnv(t)
+
+	_, err := env.runErr(t, "destroy", "shared", "--yes")
+
+	if err == nil || !strings.Contains(err.Error(), "--platform") {
+		t.Errorf("expected an error asking for --platform, got %v", err)
+	}
+}
+
+// TestDestroySharedIgnoresClustersOfOtherPlatforms destroys the shared Azure
+// resources while an AWS management cluster exists.
+func TestDestroySharedIgnoresClustersOfOtherPlatforms(t *testing.T) {
+	env := newTestEnv(t)
+	env.run(t, "create", "--management-only", "--release", "5.1.0-ec.0", "--region", "eu-central-1", "--name", "test-mgmt", "--pull-secret", env.pullSecret)
+
+	env.run(t, "destroy", "shared", "--platform", "azure", "--yes")
+
+	if !slices.Contains(env.azure.deletedResourceGroups, "tester-hyperctl") {
+		t.Errorf("expected the shared resource group to be deleted, got %v", env.azure.deletedResourceGroups)
+	}
+}
+
+func TestDestroyRejectsPlatformForClusters(t *testing.T) {
+	env := newTestEnv(t)
+	env.run(t, "create", "--management-only", "--release", "5.1.0-ec.0", "--region", "eu-central-1", "--name", "test-mgmt", "--pull-secret", env.pullSecret)
+
+	_, err := env.runErr(t, "destroy", "--platform", "aws", "--yes")
+
+	if err == nil || !strings.Contains(err.Error(), "--platform only applies to destroy shared") {
+		t.Errorf("expected --platform to be rejected, got %v", err)
+	}
+	if len(env.images.destroys) != 0 {
+		t.Errorf("expected no cluster destroyed, got %v", env.images.destroys)
+	}
 }

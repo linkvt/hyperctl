@@ -2,17 +2,16 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/linkvt/hyperctl/internal/hypershift"
 	"github.com/linkvt/hyperctl/internal/ocp"
-	"github.com/linkvt/hyperctl/internal/xdg"
 )
 
 // ensureHostedCluster creates the hosted cluster with AutoNode and writes its
 // kubeconfig, unless it is already created.
-func ensureHostedCluster(ctx context.Context, p progress, hs Hypershift, dirs xdg.Dirs, opts createOptions) error {
-	clusters := newClusterStore(dirs)
+func ensureHostedCluster(ctx context.Context, p progress, hs Hypershift, clusters clusterStore, opts createOptions) error {
 	c := hostedCluster(opts.Name, opts.HostedName)
 	installed, err := clusters.check(c)
 	if err != nil {
@@ -61,4 +60,49 @@ func ensureHostedCluster(ctx context.Context, p progress, hs Hypershift, dirs xd
 	}
 	p.done("Wrote kubeconfig %s", kubeconfigPath)
 	return clusters.markInstalled(c)
+}
+
+// destroyHostedCluster destroys an AWS hosted cluster with hypershift, only
+// its AWS resources if the management cluster is unreachable.
+func destroyHostedCluster(ctx context.Context, p progress, yes bool, deps Deps, hs Hypershift, clusters clusterStore, mgmt, hosted string) error {
+	c := hostedCluster(mgmt, hosted)
+	record, found, err := clusters.destroying(c)
+	if err != nil {
+		return err
+	}
+	if !found {
+		p.done("Creation never started, nothing to destroy")
+		return nil
+	}
+	params := hypershift.DestroyClusterParams{
+		Name:       hosted,
+		InfraID:    record.InfraID,
+		Region:     record.Region,
+		BaseDomain: record.BaseDomain,
+	}
+	var ready bool
+	_ = p.wait(ctx, "Checking the management cluster API", func(ctx context.Context) error {
+		ready = deps.Cluster.Ready(ctx, clusters.kubeconfig(managementCluster(mgmt)))
+		return nil
+	})
+	start := time.Now()
+	switch {
+	case ready:
+		p.info("Destroying")
+		if err := hs.DestroyCluster(ctx, params); err != nil {
+			return err
+		}
+	case record.InfraID != "":
+		p.info("Management cluster unreachable, destroying the AWS resources of infra ID %s", record.InfraID)
+		if err := hs.DestroyInfra(ctx, params); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("management cluster unreachable and the infra ID of hosted cluster %s is unknown, destroy its AWS resources manually", hosted)
+	}
+	p.done("Destroyed hosted cluster %s (%s)", hosted, since(start))
+	if err := deleteDNSLeftovers(ctx, p, deps, yes, record.BaseDomain, hosted); err != nil {
+		return err
+	}
+	return clusters.forget(c)
 }
