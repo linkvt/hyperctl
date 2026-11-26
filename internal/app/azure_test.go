@@ -398,9 +398,11 @@ func TestDestroyAzureDestroysHostedAndManagementCluster(t *testing.T) {
 
 	env.run(t, "destroy", "--yes")
 
-	want := []hostedClusterDeletion{{name: "test-mgmt-workload", controlPlaneNamespace: "clusters-test-mgmt-workload"}}
-	if got := env.cluster.deletedHostedClusters; !slices.Equal(got, want) {
-		t.Errorf("deleted HostedClusters: got %+v, want %+v", got, want)
+	if got, want := single(t, env.hypershift.azureDestroys).params, env.azureDestroyParams(t); got != want {
+		t.Errorf("hypershift destroy cluster:\ngot:  %+v\nwant: %+v", got, want)
+	}
+	if got := env.hypershift.azureInfraDestroys; len(got) != 0 {
+		t.Errorf("expected no hypershift destroy infra, got %+v", got)
 	}
 	var zoneRecords []string
 	for _, r := range env.azure.dnsRecords["tester-hyperctl/"+testAzureDNSZone] {
@@ -416,21 +418,25 @@ func TestDestroyAzureDestroysHostedAndManagementCluster(t *testing.T) {
 	if want := []string{"NS tester-hyperctl", "AAAA *.apps.test-mgmt-workload", "A *.apps.other"}; !slices.Equal(baseRecords, want) {
 		t.Errorf("base domain zone records: got %v, want %v", baseRecords, want)
 	}
+	// The fake hypershift destroys the workload identities, so the ingress
+	// role assignment is only found and deleted before destroy iam.
 	if env.azure.hasRoleAssignment(testBaseZoneScope, roleIngress, "principal-test-mgmt-workload-ingress-"+infraID) {
 		t.Error("expected the ingress role assignment on the base domain zone to be deleted")
 	}
-	wantGroups := []string{
-		"test-mgmt-workload-" + infraID,
-		"test-mgmt-workload-nsg-" + infraID,
-		"test-mgmt-workload-vnet-" + infraID,
-		"test-mgmt-rg",
-		"MC_test-mgmt-rg_test-mgmt_" + testAzureLocation,
-	}
+	wantGroups := []string{"test-mgmt-rg", "MC_test-mgmt-rg_test-mgmt_" + testAzureLocation}
 	if !slices.Equal(env.azure.deletedResourceGroups, wantGroups) {
 		t.Errorf("deleted resource groups:\ngot:  %v\nwant: %v", env.azure.deletedResourceGroups, wantGroups)
 	}
-	if len(env.azure.deletedIdentities) != 9 || !slices.Contains(env.azure.deletedIdentities, "tester-hyperctl/test-mgmt-workload-karpenter-"+infraID) {
-		t.Errorf("expected the 9 workload identities to be deleted, got %v", env.azure.deletedIdentities)
+	wantIAM := hypershift.DestroyAzureIAMParams{
+		Name:                   "test-mgmt-workload",
+		InfraID:                infraID,
+		CredentialsFile:        filepath.Join(env.home, ".local/share/hyperctl/azure/credentials.json"),
+		ResourceGroup:          "tester-hyperctl",
+		WorkloadIdentitiesFile: filepath.Join(env.azureHostedDir(), "workload-identities.json"),
+		DNSZoneResourceGroup:   "os4-common",
+	}
+	if got := single(t, env.hypershift.azureIAMDestroys).params; got != wantIAM {
+		t.Errorf("hypershift destroy iam:\ngot:  %+v\nwant: %+v", got, wantIAM)
 	}
 	if _, found := env.azure.resourceGroups["tester-hyperctl"]; !found {
 		t.Error("expected the shared resource group to be kept")
@@ -443,16 +449,18 @@ func TestDestroyAzureDestroysHostedAndManagementCluster(t *testing.T) {
 func TestDestroyAzureHostedWhenManagementClusterIsUnreachable(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)
-	infraID := env.hostedInfraID(t)
 	env.cluster.apiDown = true
 
 	env.run(t, "destroy", "hosted", "--yes")
 
-	if got := env.cluster.deletedHostedClusters; len(got) != 0 {
-		t.Errorf("expected no HostedCluster deletion, got %v", got)
+	if got := env.hypershift.azureDestroys; len(got) != 0 {
+		t.Errorf("expected no hypershift destroy cluster, got %+v", got)
 	}
-	if !slices.Contains(env.azure.deletedResourceGroups, "test-mgmt-workload-"+infraID) {
-		t.Errorf("expected the hosted cluster resource groups to be deleted, got %v", env.azure.deletedResourceGroups)
+	if got, want := single(t, env.hypershift.azureInfraDestroys).params, env.azureDestroyParams(t); got != want {
+		t.Errorf("hypershift destroy infra:\ngot:  %+v\nwant: %+v", got, want)
+	}
+	if got := env.hypershift.azureIAMDestroys; len(got) != 1 {
+		t.Errorf("expected hypershift destroy iam, got %+v", got)
 	}
 	if slices.Contains(env.azure.deletedResourceGroups, "test-mgmt-rg") {
 		t.Error("expected the management cluster to be kept")
@@ -462,33 +470,71 @@ func TestDestroyAzureHostedWhenManagementClusterIsUnreachable(t *testing.T) {
 func TestDestroyAzureHostedDestroysHostedCluster(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)
-	infraID := env.hostedInfraID(t)
 
 	env.run(t, "destroy", "hosted", "--yes")
 
-	if !slices.Contains(env.azure.deletedResourceGroups, "test-mgmt-workload-"+infraID) {
-		t.Errorf("expected the hosted cluster resource groups to be deleted, got %v", env.azure.deletedResourceGroups)
+	if got := env.hypershift.azureDestroys; len(got) != 1 {
+		t.Errorf("expected hypershift destroy cluster, got %+v", got)
 	}
 	if _, err := env.runErr(t, "kubeconfig", "hosted"); err == nil {
 		t.Error("expected no hosted cluster after destroy")
 	}
 }
 
-func TestDestroyAzureHostedFailsWhenControlPlaneNamespaceRemains(t *testing.T) {
+func TestDestroyAzureHostedStopsWhenDestroyClusterFails(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)
-	env.cluster.deleteHostedClusterErr = errors.New("waiting for namespace clusters-test-mgmt-workload to be deleted: timed out")
+	env.hypershift.destroyAzureClusterErr = errors.New("hypershift destroy cluster: exit status 1")
 
 	_, err := env.runErr(t, "destroy", "hosted", "--yes")
 
-	if err == nil || !strings.Contains(err.Error(), "waiting for namespace clusters-test-mgmt-workload to be deleted") {
-		t.Errorf("expected a namespace wait error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "hypershift destroy cluster") {
+		t.Errorf("expected the hypershift error, got %v", err)
 	}
-	if len(env.azure.deletedResourceGroups) != 0 {
-		t.Errorf("expected no Azure resources to be deleted, got %v", env.azure.deletedResourceGroups)
+	if got := env.hypershift.azureIAMDestroys; len(got) != 0 {
+		t.Errorf("expected the workload identities to be kept, got %+v", got)
+	}
+	if out := env.run(t, "status"); !strings.Contains(out, "test-mgmt-workload") {
+		t.Errorf("expected the hosted cluster to be kept, got:\n%s", out)
 	}
 }
 
+func TestDestroyAzureHostedWithoutWorkloadIdentitiesFile(t *testing.T) {
+	env := newTestEnv(t)
+	env.createAzureClusters(t)
+	if err := os.Remove(filepath.Join(env.azureHostedDir(), "workload-identities.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	out := env.run(t, "destroy", "hosted", "--yes")
+
+	if got := env.hypershift.azureIAMDestroys; len(got) != 0 {
+		t.Errorf("expected no hypershift destroy iam, got %+v", got)
+	}
+	if !strings.Contains(out, "workload-identities.json") {
+		t.Errorf("expected a warning about the missing workload identities file, got:\n%s", out)
+	}
+	if got := env.hypershift.azureDestroys; len(got) != 1 {
+		t.Errorf("expected hypershift destroy cluster, got %+v", got)
+	}
+}
+
+func TestDestroyAzureHostedWithoutClusterRecord(t *testing.T) {
+	env := newTestEnv(t)
+	env.createAzureClusters(t)
+	if err := os.Remove(filepath.Join(env.azureHostedDir(), "cluster.yaml")); err != nil {
+		t.Fatal(err)
+	}
+
+	out := env.run(t, "destroy", "hosted", "--yes")
+
+	if !strings.Contains(out, "Creation never started") {
+		t.Errorf("expected nothing to destroy, got:\n%s", out)
+	}
+	if got := len(env.hypershift.azureDestroys) + len(env.hypershift.azureInfraDestroys) + len(env.hypershift.azureIAMDestroys); got != 0 {
+		t.Errorf("expected no hypershift destroy, got %d", got)
+	}
+}
 func TestDestroySharedAzureResources(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)
@@ -550,4 +596,21 @@ func readJSON(t *testing.T, path string, v any) {
 func aksParamsEqual(a, b azureaccount.AKSClusterParams) bool {
 	return a.ResourceGroup == b.ResourceGroup && a.Name == b.Name && a.Location == b.Location &&
 		a.VMSize == b.VMSize && a.Nodes == b.Nodes && slices.Equal(a.Zones, b.Zones)
+}
+
+// azureHostedDir is the directory of the hosted cluster of createAzureClusters.
+func (e *testEnv) azureHostedDir() string {
+	return filepath.Join(e.home, ".local/share/hyperctl/clusters/test-mgmt/hosted/test-mgmt-workload")
+}
+
+// azureDestroyParams identify the hosted cluster of createAzureClusters.
+func (e *testEnv) azureDestroyParams(t *testing.T) hypershift.DestroyAzureParams {
+	t.Helper()
+	return hypershift.DestroyAzureParams{
+		Name:                 "test-mgmt-workload",
+		InfraID:              e.hostedInfraID(t),
+		CredentialsFile:      filepath.Join(e.home, ".local/share/hyperctl/azure/credentials.json"),
+		Location:             testAzureLocation,
+		DNSZoneResourceGroup: "os4-common",
+	}
 }

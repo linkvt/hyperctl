@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"slices"
 	"testing"
@@ -17,25 +18,32 @@ const testHypershiftPath = "/usr/local/bin/hypershift"
 
 // fakeHypershift is an in-memory hypershift binary. It records the
 // operations it ran, with the binary and management cluster they ran with,
-// and creates and destroys the hosted clusters of the fake cluster.
+// creates and destroys the hosted clusters of the fake cluster and destroys
+// the workload identities of the fake Azure subscription.
 type fakeHypershift struct {
 	cluster *fakeCluster
+	azure   *fakeAzure
 	// path is the hypershift binary in PATH, none if empty.
 	path string
 	// binaries are the paths of working hypershift binaries.
 	binaries []string
-	// installErr and createClusterErr fail Install and CreateCluster.
-	installErr       error
-	createClusterErr error
+	// installErr, createClusterErr and destroyAzureClusterErr fail Install,
+	// CreateCluster and DestroyAzureCluster.
+	installErr             error
+	createClusterErr       error
+	destroyAzureClusterErr error
 
-	installs      []recorded[hypershift.InstallParams]
-	azureInstalls []recorded[hypershift.InstallAzureParams]
-	clusters      []recorded[hypershift.CreateClusterParams]
-	destroys      []recorded[hypershift.DestroyClusterParams]
-	infraDestroys []recorded[hypershift.DestroyClusterParams]
-	azureIAMs     []recorded[hypershift.CreateAzureIAMParams]
-	azureInfras   []recorded[hypershift.CreateAzureInfraParams]
-	azureClusters []recorded[hypershift.CreateAzureClusterParams]
+	installs           []recorded[hypershift.InstallParams]
+	azureInstalls      []recorded[hypershift.InstallAzureParams]
+	clusters           []recorded[hypershift.CreateClusterParams]
+	destroys           []recorded[hypershift.DestroyClusterParams]
+	infraDestroys      []recorded[hypershift.DestroyClusterParams]
+	azureIAMs          []recorded[hypershift.CreateAzureIAMParams]
+	azureInfras        []recorded[hypershift.CreateAzureInfraParams]
+	azureClusters      []recorded[hypershift.CreateAzureClusterParams]
+	azureDestroys      []recorded[hypershift.DestroyAzureParams]
+	azureInfraDestroys []recorded[hypershift.DestroyAzureParams]
+	azureIAMDestroys   []recorded[hypershift.DestroyAzureIAMParams]
 }
 
 // recorded is an operation of the fake hypershift with its parameters.
@@ -54,9 +62,10 @@ type fakeHypershiftCLI struct {
 	out        io.Writer
 }
 
-func newFakeHypershift(cluster *fakeCluster) *fakeHypershift {
+func newFakeHypershift(cluster *fakeCluster, azure *fakeAzure) *fakeHypershift {
 	return &fakeHypershift{
 		cluster:  cluster,
+		azure:    azure,
 		path:     testHypershiftPath,
 		binaries: []string{testHypershiftPath},
 	}
@@ -132,12 +141,22 @@ func (c *fakeHypershiftCLI) HostedKubeconfig(_ context.Context, name string) ([]
 
 func (c *fakeHypershiftCLI) CreateAzureIAM(_ context.Context, params hypershift.CreateAzureIAMParams) error {
 	c.fake.azureIAMs = append(c.fake.azureIAMs, record(c, params))
+	if err := os.WriteFile(params.OutputFile, []byte("{}\n"), 0o600); err != nil {
+		return err
+	}
 	c.print("create")
 	return nil
 }
 
 func (c *fakeHypershiftCLI) CreateAzureInfra(_ context.Context, params hypershift.CreateAzureInfraParams) error {
 	c.fake.azureInfras = append(c.fake.azureInfras, record(c, params))
+	output := fmt.Sprintf(`resourceGroupName: %[1]s-%[2]s
+vnetID: /subscriptions/%[3]s/resourceGroups/%[1]s-vnet-%[2]s/providers/Microsoft.Network/virtualNetworks/%[1]s-%[2]s
+securityGroupID: /subscriptions/%[3]s/resourceGroups/%[1]s-nsg-%[2]s/providers/Microsoft.Network/networkSecurityGroups/%[1]s-%[2]s-nsg
+`, params.Name, params.InfraID, testSubscriptionID)
+	if err := os.WriteFile(params.OutputFile, []byte(output), 0o600); err != nil {
+		return err
+	}
 	c.print("create")
 	return nil
 }
@@ -146,6 +165,33 @@ func (c *fakeHypershiftCLI) CreateAzureCluster(_ context.Context, params hypersh
 	c.fake.azureClusters = append(c.fake.azureClusters, record(c, params))
 	c.fake.cluster.hostedClusters[params.Name] = availableHostedCluster()
 	c.print("create")
+	return nil
+}
+
+func (c *fakeHypershiftCLI) DestroyAzureCluster(_ context.Context, params hypershift.DestroyAzureParams) error {
+	c.fake.azureDestroys = append(c.fake.azureDestroys, record(c, params))
+	if c.fake.destroyAzureClusterErr != nil {
+		return c.fake.destroyAzureClusterErr
+	}
+	delete(c.fake.cluster.hostedClusters, params.Name)
+	c.print("destroy")
+	return nil
+}
+
+func (c *fakeHypershiftCLI) DestroyAzureInfra(_ context.Context, params hypershift.DestroyAzureParams) error {
+	c.fake.azureInfraDestroys = append(c.fake.azureInfraDestroys, record(c, params))
+	c.print("destroy")
+	return nil
+}
+
+func (c *fakeHypershiftCLI) DestroyAzureIAM(_ context.Context, params hypershift.DestroyAzureIAMParams) error {
+	c.fake.azureIAMDestroys = append(c.fake.azureIAMDestroys, record(c, params))
+	c.fake.azure.destroyedIdentities = append(c.fake.azure.destroyedIdentities, fakeWorkloadIdentities{
+		resourceGroup: params.ResourceGroup,
+		cluster:       params.Name,
+		infraID:       params.InfraID,
+	})
+	c.print("destroy")
 	return nil
 }
 

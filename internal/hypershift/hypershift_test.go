@@ -26,6 +26,14 @@ var testDestroyParams = DestroyClusterParams{
 	BaseDomain: "example.com",
 }
 
+var testAzureDestroyParams = DestroyAzureParams{
+	Name:                 "workload",
+	InfraID:              "workload-abcde",
+	CredentialsFile:      "/azure/credentials.json",
+	Location:             "eastus",
+	DNSZoneResourceGroup: "os4-common",
+}
+
 var testAzureClusterArgs = []string{"create", "cluster", "azure",
 	"--name", "workload",
 	"--infra-id", "workload-abcde",
@@ -254,6 +262,49 @@ func TestCLICommands(t *testing.T) {
 				return c.CreateAzureCluster(ctx, testAzureClusterParams("/id_ed25519.pub"))
 			},
 			want: []processtest.Call{{Path: testPath, Env: testEnv, Args: slices.Concat(testAzureClusterArgs, []string{"--ssh-key", "/id_ed25519.pub"})}},
+		},
+		"destroy Azure cluster": {
+			run: func(ctx context.Context, c CLI) error {
+				return c.DestroyAzureCluster(ctx, testAzureDestroyParams)
+			},
+			want: []processtest.Call{{Path: testPath, Env: testEnv, Args: []string{"destroy", "cluster", "azure",
+				"--name", "workload",
+				"--infra-id", "workload-abcde",
+				"--azure-creds", "/azure/credentials.json",
+				"--location", "eastus",
+				"--dns-zone-rg-name", "os4-common",
+			}}},
+		},
+		"destroy Azure infra": {
+			run: func(ctx context.Context, c CLI) error {
+				return c.DestroyAzureInfra(ctx, testAzureDestroyParams)
+			},
+			want: []processtest.Call{{Path: testPath, Env: testEnv, Args: []string{"destroy", "infra", "azure",
+				"--name", "workload",
+				"--infra-id", "workload-abcde",
+				"--azure-creds", "/azure/credentials.json",
+				"--location", "eastus",
+			}}},
+		},
+		"destroy Azure IAM": {
+			run: func(ctx context.Context, c CLI) error {
+				return c.DestroyAzureIAM(ctx, DestroyAzureIAMParams{
+					Name:                   "workload",
+					InfraID:                "workload-abcde",
+					CredentialsFile:        "/azure/credentials.json",
+					ResourceGroup:          "hyperctl-shared",
+					WorkloadIdentitiesFile: "/hosted/workload-identities.json",
+					DNSZoneResourceGroup:   "os4-common",
+				})
+			},
+			want: []processtest.Call{{Path: testPath, Env: testEnv, Args: []string{"destroy", "iam", "azure",
+				"--name", "workload",
+				"--infra-id", "workload-abcde",
+				"--azure-creds", "/azure/credentials.json",
+				"--resource-group-name", "hyperctl-shared",
+				"--workload-identities-file", "/hosted/workload-identities.json",
+				"--dns-zone-rg-name", "os4-common",
+			}}},
 		},
 	}
 	for name, tc := range tests {

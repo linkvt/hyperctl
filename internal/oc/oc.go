@@ -89,33 +89,6 @@ func (c CLI) ApplyServerSide(ctx context.Context, kubeconfig, url string) error 
 	return nil
 }
 
-// DeleteHostedCluster deletes a HostedCluster in the clusters namespace and
-// waits until its control plane namespace is gone.
-func (c CLI) DeleteHostedCluster(ctx context.Context, kubeconfig, name, controlPlaneNamespace string) error {
-	if _, err := c.run(ctx, kubeconfig, "delete", "hostedcluster", name, "-n", "clusters", "--ignore-not-found", "--timeout=30m"); err != nil {
-		return fmt.Errorf("deleting hosted cluster %s: %w", name, err)
-	}
-	return c.waitNamespaceDeleted(ctx, kubeconfig, controlPlaneNamespace)
-}
-
-// waitNamespaceDeleted waits until the namespace is gone. A namespace that
-// was already deleted counts as gone, which waiting for it does not report
-// consistently.
-func (c CLI) waitNamespaceDeleted(ctx context.Context, kubeconfig, namespace string) error {
-	_, waitErr := c.run(ctx, kubeconfig, "wait", "--for=delete", "namespace/"+namespace, "--timeout=15m")
-	if waitErr == nil {
-		return nil
-	}
-	out, err := c.run(ctx, kubeconfig, "get", "namespace", namespace, "--ignore-not-found", "-o", "name")
-	if err != nil {
-		return fmt.Errorf("checking namespace %s: %w", namespace, err)
-	}
-	if strings.TrimSpace(string(out)) != "" {
-		return fmt.Errorf("waiting for namespace %s to be deleted: %w", namespace, waitErr)
-	}
-	return nil
-}
-
 // run runs oc against the cluster of kubeconfig and returns its output,
 // with stderr in the error.
 func (c CLI) run(ctx context.Context, kubeconfig string, args ...string) ([]byte, error) {

@@ -119,7 +119,7 @@ Shared resources, created when missing on every `create` and kept when destroyin
 The service principal credentials and the signing key are kept in `~/.local/share/hyperctl/azure`.
 `hyperctl destroy shared` deletes all of them once no management cluster is left.
 
-`destroy` deletes the HostedCluster, the External DNS records, the `*.apps` record of the hosted cluster in the base domain zone (only if owned by its infra ID), the role assignment of the ingress identity on that zone, the resource groups and workload identities of the hosted cluster and the resource group of the AKS cluster.
+`destroy` runs `hypershift destroy cluster azure`, which deletes the HostedCluster and the resource groups of the hosted cluster (`hypershift destroy infra azure` if the management cluster is unreachable). hyperctl then deletes the External DNS records, the `*.apps` record of the hosted cluster in the base domain zone (only if owned by its infra ID) and the role assignment of the ingress identity on that zone, runs `hypershift destroy iam azure` for the workload identities and deletes the resource group of the AKS cluster.
 
 On Azure `hyperctl image karpenter-operator` follows `hypershift.openshift.io/karpenter-operator-image`, and `hyperctl image karpenter-provider` overrides the Azure provider that the standalone karpenter-operator deploys.
 

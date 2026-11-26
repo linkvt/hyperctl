@@ -2,12 +2,17 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
-	"github.com/linkvt/hyperctl/internal/azureaccount"
+	"github.com/urfave/cli/v3"
+	"sigs.k8s.io/yaml"
+
 	"github.com/linkvt/hyperctl/internal/hypershift"
 	"github.com/linkvt/hyperctl/internal/ocp"
 	"github.com/linkvt/hyperctl/internal/xdg"
@@ -23,20 +28,6 @@ const (
 	roleNetwork       = "be7a6435-15ae-4171-8f30-4a343eff9e8f"
 	roleImageRegistry = "8b32b316-c2f5-4ddf-b05b-83dacd2d08b5"
 )
-
-// workloadIdentities are the components with a workload identity, as named
-// by hypershift create iam azure --enable-karpenter.
-var workloadIdentities = []string{
-	"disk",
-	"file",
-	"image-registry",
-	"ingress",
-	"cloud-provider",
-	"node-pool-mgmt",
-	"network",
-	"control-plane-operator",
-	"karpenter",
-}
 
 // ensureAzureHostedCluster creates the workload identities, infrastructure,
 // role assignments and the hosted cluster with AutoNode and writes its
@@ -74,7 +65,7 @@ func ensureAzureHostedCluster(ctx context.Context, p progress, account AzureAcco
 	if err := saveClusterRecord(dir, record); err != nil {
 		return err
 	}
-	identitiesFile := filepath.Join(dir, "workload-identities.json")
+	identitiesFile := workloadIdentitiesFile(dir)
 	infraFile := filepath.Join(dir, "infra-output.yaml")
 
 	p.info("Creating workload identities")
@@ -104,7 +95,11 @@ func ensureAzureHostedCluster(ctx context.Context, p progress, account AzureAcco
 		return err
 	}
 	p.done("Created infrastructure")
-	assignments := workloadIdentityRoles(shared.Subscription.ID, opts.HostedName, record.InfraID, dnsZoneScope(shared.Subscription.ID, shared.BaseDomainResourceGroup, opts.BaseDomain))
+	groups, err := readAzureInfraGroups(infraFile, shared.Subscription.ID)
+	if err != nil {
+		return err
+	}
+	assignments := workloadIdentityRoles(opts.HostedName, record.InfraID, groups, dnsZoneScope(shared.Subscription.ID, shared.BaseDomainResourceGroup, opts.BaseDomain))
 	err = p.wait(ctx, "Assigning roles to the workload identities", func(ctx context.Context) error {
 		return assignWorkloadIdentityRoles(ctx, account, shared.ResourceGroup, assignments)
 	})
@@ -147,6 +142,63 @@ func ensureAzureHostedCluster(ctx context.Context, p progress, account AzureAcco
 	return saveClusterRecord(dir, record)
 }
 
+// workloadIdentitiesFile is the output of hypershift create iam azure in the
+// directory of a hosted cluster.
+func workloadIdentitiesFile(dir string) string {
+	return filepath.Join(dir, "workload-identities.json")
+}
+
+// azureInfraGroups are the scopes of the resource groups of a hosted
+// cluster's infrastructure.
+type azureInfraGroups struct {
+	cluster string
+	nsg     string
+	vnet    string
+}
+
+// readAzureInfraGroups reads the resource groups of the infrastructure from
+// the output of hypershift create infra azure.
+func readAzureInfraGroups(file, subscriptionID string) (azureInfraGroups, error) {
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return azureInfraGroups{}, err
+	}
+	var output struct {
+		ResourceGroupName string `json:"resourceGroupName"`
+		VNetID            string `json:"vnetID"`
+		SecurityGroupID   string `json:"securityGroupID"`
+	}
+	if err := yaml.Unmarshal(data, &output); err != nil {
+		return azureInfraGroups{}, fmt.Errorf("reading %s: %w", file, err)
+	}
+	if output.ResourceGroupName == "" {
+		return azureInfraGroups{}, fmt.Errorf("reading %s: no resourceGroupName", file)
+	}
+	nsg, err := resourceGroupScope(output.SecurityGroupID)
+	if err != nil {
+		return azureInfraGroups{}, fmt.Errorf("reading %s: %w", file, err)
+	}
+	vnet, err := resourceGroupScope(output.VNetID)
+	if err != nil {
+		return azureInfraGroups{}, fmt.Errorf("reading %s: %w", file, err)
+	}
+	return azureInfraGroups{
+		cluster: "/subscriptions/" + subscriptionID + "/resourceGroups/" + output.ResourceGroupName,
+		nsg:     nsg,
+		vnet:    vnet,
+	}, nil
+}
+
+// resourceGroupScope returns the scope of the resource group of an Azure
+// resource ID.
+func resourceGroupScope(id string) (string, error) {
+	scope, _, found := strings.Cut(id, "/providers/")
+	if !found || !strings.Contains(scope, "/resourceGroups/") {
+		return "", fmt.Errorf("%q is not the ID of a resource in a resource group", id)
+	}
+	return scope, nil
+}
+
 // roleAssignment assigns a role to a workload identity.
 type roleAssignment struct {
 	identity string
@@ -159,11 +211,8 @@ type roleAssignment struct {
 // hypershift looks up the identities with Microsoft Graph, which the service
 // principal may not read. The ingress identity gets its DNS role on the base
 // domain zone instead of its whole resource group.
-func workloadIdentityRoles(subscriptionID, hosted, infraID, baseDomainZoneScope string) []roleAssignment {
-	resourceGroups := "/subscriptions/" + subscriptionID + "/resourceGroups/"
-	cluster := resourceGroups + hosted + "-" + infraID
-	nsg := resourceGroups + hosted + "-nsg-" + infraID
-	vnet := resourceGroups + hosted + "-vnet-" + infraID
+func workloadIdentityRoles(hosted, infraID string, groups azureInfraGroups, baseDomainZoneScope string) []roleAssignment {
+	cluster, nsg, vnet := groups.cluster, groups.nsg, groups.vnet
 
 	var assignments []roleAssignment
 	for _, a := range []struct {
@@ -221,11 +270,11 @@ func workloadIdentityName(hosted, component, infraID string) string {
 	return hosted + "-" + component + "-" + infraID
 }
 
-// destroyAzureHostedCluster deletes the HostedCluster, if the management
-// cluster is reachable, and the Azure resources of the hosted cluster: its
-// DNS records, resource groups, workload identities and their role
-// assignments outside of the resource groups.
-func destroyAzureHostedCluster(ctx context.Context, p progress, account AzureAccount, cluster ClusterAPI, dirs xdg.Dirs, mgmt, hosted string) error {
+// destroyAzureHostedCluster destroys a hosted cluster with hypershift, only
+// its infrastructure if the management cluster is unreachable, then the
+// Azure resources that only hyperctl knows about and the workload
+// identities.
+func destroyAzureHostedCluster(ctx context.Context, p progress, cmd *cli.Command, deps Deps, dirs xdg.Dirs, mgmt, hosted string) error {
 	dir := hostedDir(dirs, mgmt, hosted)
 	record, found, err := loadClusterRecord(dir)
 	if err != nil {
@@ -235,42 +284,79 @@ func destroyAzureHostedCluster(ctx context.Context, p progress, account AzureAcc
 		p.done("Creation never started, nothing to destroy")
 		return os.RemoveAll(dir)
 	}
-	start := time.Now()
+	cfg, err := loadConfig(dirs.Config)
+	if err != nil {
+		return err
+	}
+	hypershiftPath, err := resolveHypershift(ctx, cmd, deps, dirs, cfg)
+	if err != nil {
+		return err
+	}
 	kubeconfig := mgmtKubeconfigPath(dirs, mgmt)
+	hs := deps.Hypershift(hypershiftPath, kubeconfig, p.tool("hypershift"))
+	params := hypershift.DestroyAzureParams{
+		Name:                 hosted,
+		InfraID:              record.InfraID,
+		CredentialsFile:      azureCredentialsFile(dirs),
+		Location:             record.Region,
+		DNSZoneResourceGroup: record.Azure.BaseDomainResourceGroup,
+	}
+	start := time.Now()
 	var ready bool
 	_ = p.wait(ctx, "Checking the management cluster API", func(ctx context.Context) error {
-		ready = cluster.Ready(ctx, kubeconfig)
+		ready = deps.Cluster.Ready(ctx, kubeconfig)
 		return nil
 	})
 	if ready {
-		err := p.wait(ctx, "Deleting the HostedCluster, this takes about 5 minutes", func(ctx context.Context) error {
-			return cluster.DeleteHostedCluster(ctx, kubeconfig, hosted, controlPlaneNamespace(hosted))
-		})
+		p.info("Destroying")
+		if err := hs.DestroyAzureCluster(ctx, params); err != nil {
+			return err
+		}
+	} else {
+		p.warn("Management cluster unreachable, destroying only the Azure resources of infra ID %s", record.InfraID)
+		if err := hs.DestroyAzureInfra(ctx, params); err != nil {
+			return err
+		}
+	}
+
+	err = p.wait(ctx, "Deleting the DNS records and the ingress role assignment", func(ctx context.Context) error {
+		subscription, err := deps.Azure.Subscription(ctx)
 		if err != nil {
 			return err
 		}
-		p.done("Deleted the HostedCluster")
-	} else {
-		p.warn("Management cluster unreachable, deleting only the Azure resources of infra ID %s", record.InfraID)
-	}
-
-	var subscription azureaccount.Subscription
-	err = p.wait(ctx, "Deleting the Azure resources of infra ID "+record.InfraID, func(ctx context.Context) error {
-		var err error
-		if subscription, err = account.Subscription(ctx); err != nil {
-			return err
-		}
-		return deleteAzureHostedResources(ctx, account, subscription.ID, hosted, record)
+		return deleteAzureHostedResources(ctx, deps.Azure, subscription.ID, hosted, record)
 	})
 	if err != nil {
 		return err
+	}
+
+	identitiesFile := workloadIdentitiesFile(dir)
+	switch _, err := os.Stat(identitiesFile); {
+	case errors.Is(err, fs.ErrNotExist):
+		p.warn("Skipping the workload identities, %s does not exist. Destroying the shared resources deletes any that were created.", identitiesFile)
+	case err != nil:
+		return err
+	default:
+		p.info("Destroying the workload identities")
+		if err := hs.DestroyAzureIAM(ctx, hypershift.DestroyAzureIAMParams{
+			Name:                   hosted,
+			InfraID:                record.InfraID,
+			CredentialsFile:        params.CredentialsFile,
+			ResourceGroup:          record.Azure.ResourceGroup,
+			WorkloadIdentitiesFile: identitiesFile,
+			DNSZoneResourceGroup:   record.Azure.BaseDomainResourceGroup,
+		}); err != nil {
+			return err
+		}
 	}
 	p.done("Destroyed hosted cluster %s (%s)", hosted, since(start))
 	return os.RemoveAll(dir)
 }
 
 // deleteAzureHostedResources deletes the Azure resources of a hosted cluster
-// that deleting the HostedCluster leaves behind.
+// that hypershift does not know about: DNS records left by External DNS and
+// the ingress operator, and the ingress role assignment on the base domain
+// zone. The role assignment must be deleted before the workload identities.
 func deleteAzureHostedResources(ctx context.Context, account AzureAccount, subscriptionID, hosted string, record clusterRecord) error {
 	shared := record.Azure
 	// External DNS only deletes its records after a while. The zone holds
@@ -303,29 +389,11 @@ func deleteAzureHostedResources(ctx context.Context, account AzureAccount, subsc
 		}
 	}
 
-	// The role assignment on the base domain zone outlives the resource
-	// groups and must be deleted before the identity.
+	// Unlike the role assignments in the resource groups of the hosted
+	// cluster, the one on the base domain zone outlives them.
 	ingress, found, err := account.IdentityPrincipalID(ctx, shared.ResourceGroup, workloadIdentityName(hosted, "ingress", record.InfraID))
-	if err != nil {
+	if err != nil || !found {
 		return err
 	}
-	if found {
-		if err := account.DeleteRoleAssignments(ctx, dnsZoneScope(subscriptionID, shared.BaseDomainResourceGroup, record.BaseDomain), ingress); err != nil {
-			return err
-		}
-	}
-
-	if err := account.DeleteResourceGroups(ctx,
-		hosted+"-"+record.InfraID,
-		hosted+"-nsg-"+record.InfraID,
-		hosted+"-vnet-"+record.InfraID,
-	); err != nil {
-		return err
-	}
-	for _, component := range workloadIdentities {
-		if err := account.DeleteIdentity(ctx, shared.ResourceGroup, workloadIdentityName(hosted, component, record.InfraID)); err != nil {
-			return err
-		}
-	}
-	return nil
+	return account.DeleteRoleAssignments(ctx, dnsZoneScope(subscriptionID, shared.BaseDomainResourceGroup, record.BaseDomain), ingress)
 }

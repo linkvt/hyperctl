@@ -77,7 +77,7 @@ func runDestroy(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if st.HostedCluster != "" {
 		p.step("Hosted cluster %s", st.HostedCluster)
 		if platform == platformAzure {
-			err = destroyAzureHostedCluster(ctx, p, deps.Azure, deps.Cluster, dirs, st.MgmtCluster, st.HostedCluster)
+			err = destroyAzureHostedCluster(ctx, p, cmd, deps, dirs, st.MgmtCluster, st.HostedCluster)
 		} else {
 			err = destroyAWSHostedCluster(ctx, p, cmd, deps, dirs, st.MgmtCluster, st.HostedCluster)
 		}

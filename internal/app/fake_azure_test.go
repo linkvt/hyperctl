@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/linkvt/hyperctl/internal/azureaccount"
 )
@@ -14,7 +15,7 @@ const (
 )
 
 // fakeAzure is an in-memory Azure subscription. Workload identities exist
-// unless deleted, as the fake hypershift does not create them.
+// unless the fake hypershift destroyed them, as it does not create them.
 type fakeAzure struct {
 	// zones maps location/vmSize to the zones offering the VM size, other
 	// VM sizes are not offered.
@@ -27,7 +28,7 @@ type fakeAzure struct {
 	deletedApplications []string
 	secretsAdded        int
 	roleAssignments     []fakeRoleAssignment
-	deletedIdentities   []string
+	destroyedIdentities []fakeWorkloadIdentities
 	// oidcIssuers maps storage accounts to their documents.
 	oidcIssuers map[string]map[string][]byte
 	dnsZones    map[string]bool
@@ -40,6 +41,13 @@ type fakeRoleAssignment struct {
 	scope     string
 	role      string
 	principal string
+}
+
+// fakeWorkloadIdentities are the workload identities of a hosted cluster.
+type fakeWorkloadIdentities struct {
+	resourceGroup string
+	cluster       string
+	infraID       string
 }
 
 func newFakeAzure() *fakeAzure {
@@ -121,15 +129,12 @@ func (f *fakeAzure) DeleteRoleAssignments(_ context.Context, scope, principal st
 }
 
 func (f *fakeAzure) IdentityPrincipalID(_ context.Context, resourceGroup, name string) (string, bool, error) {
-	if slices.Contains(f.deletedIdentities, resourceGroup+"/"+name) {
-		return "", false, nil
+	for _, d := range f.destroyedIdentities {
+		if d.resourceGroup == resourceGroup && strings.HasPrefix(name, d.cluster+"-") && strings.HasSuffix(name, "-"+d.infraID) {
+			return "", false, nil
+		}
 	}
 	return "principal-" + name, true, nil
-}
-
-func (f *fakeAzure) DeleteIdentity(_ context.Context, resourceGroup, name string) error {
-	f.deletedIdentities = append(f.deletedIdentities, resourceGroup+"/"+name)
-	return nil
 }
 
 func (f *fakeAzure) EnsureOIDCIssuer(_ context.Context, resourceGroup, storageAccount, _ string, documents map[string][]byte) error {
