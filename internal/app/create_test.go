@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"sigs.k8s.io/yaml"
+
+	"github.com/linkvt/hyperctl/internal/hypershift"
 )
 
 func TestCreateRunsInstallerWithReleaseAndInstallConfig(t *testing.T) {
@@ -212,8 +214,8 @@ func TestCreateAcceptsReleasePullSpec(t *testing.T) {
 	if got := env.installerCalls(t)[0].releaseOverride; got != pullSpec {
 		t.Errorf("release override: got %q, want %q", got, pullSpec)
 	}
-	if want := "--release-image " + pullSpec; !strings.Contains(env.hypershiftCall(t, "create cluster ").args, want) {
-		t.Errorf("expected hosted cluster with %q", want)
+	if got := single(t, env.hypershift.clusters).params.ReleaseImage; got != pullSpec {
+		t.Errorf("hosted cluster release image: got %q, want %q", got, pullSpec)
 	}
 }
 
@@ -364,16 +366,15 @@ func TestCreateInstallsHyperShiftOperator(t *testing.T) {
 		"--oidc-bucket", "my-oidc",
 	)
 
-	call := env.hypershiftCall(t, "install ")
-	want := "install" +
-		" --oidc-storage-provider-s3-bucket-name my-oidc" +
-		" --oidc-storage-provider-s3-credentials " + filepath.Join(env.home, ".aws", "credentials") +
-		" --oidc-storage-provider-s3-region us-east-2" +
-		" --tech-preview-no-upgrade" +
-		" --enable-standalone-karpenter-operator" +
-		" --wait-until-available"
-	if call.args != want {
-		t.Errorf("hypershift args:\ngot:  %s\nwant: %s", call.args, want)
+	call := single(t, env.hypershift.installs)
+	want := hypershift.InstallParams{
+		OIDCBucket:                  "my-oidc",
+		OIDCBucketRegion:            "us-east-2",
+		AWSCredentialsFile:          filepath.Join(env.home, ".aws", "credentials"),
+		StandaloneKarpenterOperator: true,
+	}
+	if call.params != want {
+		t.Errorf("hypershift install:\ngot:  %+v\nwant: %+v", call.params, want)
 	}
 	if want := filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/install/auth/kubeconfig"); call.kubeconfig != want {
 		t.Errorf("hypershift KUBECONFIG: got %q, want %q", call.kubeconfig, want)
@@ -393,9 +394,8 @@ func TestCreateEmbeddedKarpenterOperator(t *testing.T) {
 		"--oidc-bucket", "my-oidc",
 	)
 
-	call := env.hypershiftCall(t, "install ")
-	if strings.Contains(call.args, "--enable-standalone-karpenter-operator") {
-		t.Errorf("expected no standalone Karpenter operator, got hypershift args: %s", call.args)
+	if params := single(t, env.hypershift.installs).params; params.StandaloneKarpenterOperator {
+		t.Errorf("expected no standalone Karpenter operator, got hypershift install %+v", params)
 	}
 }
 
@@ -411,15 +411,8 @@ func TestCreateManagementOnlySkipsHostedCluster(t *testing.T) {
 		"--pull-secret", env.pullSecret,
 	)
 
-	var installs, hostedCreates int
-	for _, call := range env.hypershiftCalls(t) {
-		if strings.HasPrefix(call.args, "install ") {
-			installs++
-		}
-		if strings.HasPrefix(call.args, "create cluster ") {
-			hostedCreates++
-		}
-	}
+	installs := len(env.hypershift.installs)
+	hostedCreates := len(env.hypershift.clusters)
 	if installs != 1 || hostedCreates != 0 {
 		t.Errorf("expected one operator install and no hosted cluster creation, got %d installs and %d hosted creates", installs, hostedCreates)
 	}
@@ -468,10 +461,8 @@ func TestCreateRemembersManagementOnlyMode(t *testing.T) {
 	}
 	env.run(t, args...)
 
-	for _, call := range env.hypershiftCalls(t) {
-		if strings.HasPrefix(call.args, "create cluster ") {
-			t.Errorf("remembered management-only mode created a hosted cluster: %s", call.args)
-		}
+	for _, call := range env.hypershift.clusters {
+		t.Errorf("remembered management-only mode created a hosted cluster: %+v", call.params)
 	}
 
 	var state struct {
@@ -507,13 +498,7 @@ func TestCreateCanOverrideRememberedManagementOnlyMode(t *testing.T) {
 	}
 	env.run(t, args...)
 
-	var hostedCreates int
-	for _, call := range env.hypershiftCalls(t) {
-		if strings.HasPrefix(call.args, "create cluster ") {
-			hostedCreates++
-		}
-	}
-	if hostedCreates != 1 {
+	if hostedCreates := len(env.hypershift.clusters); hostedCreates != 1 {
 		t.Errorf("expected explicit management-only=false to create one hosted cluster, got %d", hostedCreates)
 	}
 }
@@ -529,20 +514,21 @@ func TestCreateCreatesHostedClusterWithAutoNode(t *testing.T) {
 		"--pull-secret", env.pullSecret,
 	)
 
-	call := env.hypershiftCall(t, "create cluster ")
-	want := "^create cluster aws" +
-		" --name test-mgmt-workload" +
-		" --infra-id test-mgmt-workload-[a-z0-9]{5}" +
-		" --region eu-central-1" +
-		" --base-domain example.com" +
-		" --pull-secret " + regexp.QuoteMeta(env.pullSecret) +
-		" --release-image quay\\.io/openshift-release-dev/ocp-release:5\\.1\\.0-ec\\.0-x86_64" +
-		" --node-pool-replicas 1" +
-		" --auto-node" +
-		" --wait" +
-		" --timeout 45m0s$"
-	if !regexp.MustCompile(want).MatchString(call.args) {
-		t.Errorf("hypershift args:\ngot:  %s\nwant: %s", call.args, want)
+	call := single(t, env.hypershift.clusters)
+	params := call.params
+	if !regexp.MustCompile(`^test-mgmt-workload-[a-z0-9]{5}$`).MatchString(params.InfraID) {
+		t.Errorf("infra ID: got %q", params.InfraID)
+	}
+	params.InfraID = ""
+	want := hypershift.CreateClusterParams{
+		Name:         "test-mgmt-workload",
+		Region:       "eu-central-1",
+		BaseDomain:   "example.com",
+		PullSecret:   env.pullSecret,
+		ReleaseImage: "quay.io/openshift-release-dev/ocp-release:5.1.0-ec.0-x86_64",
+	}
+	if params != want {
+		t.Errorf("hypershift create cluster:\ngot:  %+v\nwant: %+v", params, want)
 	}
 	if want := filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/install/auth/kubeconfig"); call.kubeconfig != want {
 		t.Errorf("hypershift KUBECONFIG: got %q, want %q", call.kubeconfig, want)
@@ -551,7 +537,7 @@ func TestCreateCreatesHostedClusterWithAutoNode(t *testing.T) {
 
 func TestCreateRequiresHypershiftBinary(t *testing.T) {
 	env := newTestEnv(t)
-	env.moveHypershiftOutOfPath(t)
+	env.hypershift.path = ""
 
 	_, err := env.runErr(t, "create",
 		"--release", "5.1.0-ec.0",
@@ -570,7 +556,9 @@ func TestCreateRequiresHypershiftBinary(t *testing.T) {
 
 func TestCreateUsesHypershiftFromConfig(t *testing.T) {
 	env := newTestEnv(t)
-	path := env.moveHypershiftOutOfPath(t)
+	const path = "/opt/hypershift/bin/hypershift"
+	env.hypershift.path = ""
+	env.hypershift.binaries = append(env.hypershift.binaries, path)
 	configPath := filepath.Join(env.home, ".config", "hyperctl", "config.yaml")
 	mustMkdir(t, filepath.Dir(configPath))
 	writeFile(t, configPath, "hypershift: "+path+"\n", 0o600)
@@ -582,7 +570,9 @@ func TestCreateUsesHypershiftFromConfig(t *testing.T) {
 		"--pull-secret", env.pullSecret,
 	)
 
-	env.hypershiftCall(t, "create cluster ")
+	if got := single(t, env.hypershift.clusters).path; got != path {
+		t.Errorf("hypershift binary: got %s, want %s", got, path)
+	}
 }
 
 func TestCreateSkipsInstalledCluster(t *testing.T) {
@@ -640,13 +630,7 @@ func TestCreateSkipsCreatedHostedCluster(t *testing.T) {
 		)
 	}
 
-	var creates int
-	for _, call := range env.hypershiftCalls(t) {
-		if strings.HasPrefix(call.args, "create cluster ") {
-			creates++
-		}
-	}
-	if creates != 1 {
+	if creates := len(env.hypershift.clusters); creates != 1 {
 		t.Errorf("expected 1 hosted cluster creation, got %d", creates)
 	}
 }

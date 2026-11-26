@@ -173,7 +173,7 @@ func destroyAWSHostedCluster(ctx context.Context, p progress, cmd *cli.Command, 
 	if err != nil {
 		return err
 	}
-	hs := hypershift.New(hypershiftPath, mgmtKubeconfigPath(dirs, mgmt), p.tool("hypershift"))
+	hs := deps.Hypershift(hypershiftPath, mgmtKubeconfigPath(dirs, mgmt), p.tool("hypershift"))
 	return destroyHostedCluster(ctx, p, cmd.Bool("yes"), deps, hs, dirs, mgmt, hosted)
 }
 
@@ -189,7 +189,7 @@ func destroyTargets(st state, scope string) []string {
 	return targets
 }
 
-func destroyHostedCluster(ctx context.Context, p progress, yes bool, deps Deps, hs hypershift.CLI, dirs xdg.Dirs, mgmt, hosted string) error {
+func destroyHostedCluster(ctx context.Context, p progress, yes bool, deps Deps, hs Hypershift, dirs xdg.Dirs, mgmt, hosted string) error {
 	dir := hostedDir(dirs, mgmt, hosted)
 	record, found, err := loadClusterRecord(dir)
 	if err != nil {

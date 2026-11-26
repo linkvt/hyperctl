@@ -172,23 +172,6 @@ echo '{}' > "$dir/metadata.json"
 [ -z "$HYPERCTL_TEST_INSTALLER_FAIL" ] || exit 1
 `
 
-// fakeHypershift records its arguments and the kubeconfig it runs against.
-// "create kubeconfig" prints a fake hosted cluster kubeconfig. It fails for
-// the subcommand in HYPERCTL_TEST_HYPERSHIFT_FAIL.
-const fakeHypershift = `#!/bin/sh
-d="$HYPERCTL_TEST_LOG/hypershift-$(ls "$HYPERCTL_TEST_LOG" | grep -c '^hypershift-')"
-mkdir -p "$d"
-echo "$*" > "$d/args"
-printf '%s' "$KUBECONFIG" > "$d/kubeconfig"
-[ -n "$HYPERCTL_TEST_HYPERSHIFT_FAIL" ] && [ "$1" = "$HYPERCTL_TEST_HYPERSHIFT_FAIL" ] && exit 1
-case "$1 $2" in
-  "create kubeconfig") cat <<KUBECONFIG
-` + testHostedKubeconfig + `KUBECONFIG
-  ;;
-  *) echo "fake $1 output" ;;
-esac
-`
-
 // testEnv isolates a hyperctl run: temp HOME, fake binaries on PATH and a
 // fake AWS identity.
 type testEnv struct {
@@ -197,6 +180,7 @@ type testEnv struct {
 	logDir        string
 	pullSecret    string
 	aws           *fakeAWS
+	hypershift    *fakeHypershift
 	azure         *fakeAzure
 	defaultRegion string
 	releasesURL   string
@@ -211,6 +195,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		pullSecret: filepath.Join(root, "pull-secret.json"),
 		aws:        &fakeAWS{callerARN: testIAMUserARN, publicBuckets: map[string]string{}, dns: map[string][]string{}},
 		azure:      newFakeAzure(),
+		hypershift: newFakeHypershift(),
 	}
 	binDir := filepath.Join(root, "bin")
 	e.binDir = binDir
@@ -219,7 +204,6 @@ func newTestEnv(t *testing.T) *testEnv {
 		mustMkdir(t, dir)
 	}
 	writeFile(t, filepath.Join(binDir, "oc"), fakeOC, 0o755)
-	writeFile(t, filepath.Join(binDir, "hypershift"), fakeHypershift, 0o755)
 	mustMkdir(t, filepath.Join(e.home, ".aws"))
 	writeFile(t, filepath.Join(e.home, ".aws", "credentials"), "[default]\n", 0o600)
 	writeFile(t, fakeInstallerPath, fakeInstaller, 0o755)
@@ -235,19 +219,6 @@ func newTestEnv(t *testing.T) *testEnv {
 	t.Setenv("HYPERCTL_TEST_LOG", e.logDir)
 	t.Setenv("HYPERCTL_TEST_FAKE_INSTALLER", fakeInstallerPath)
 	return e
-}
-
-// moveHypershiftOutOfPath moves the fake hypershift out of PATH and returns
-// its new location.
-func (e *testEnv) moveHypershiftOutOfPath(t *testing.T) string {
-	t.Helper()
-	dir := filepath.Join(filepath.Dir(e.binDir), "hypershift-bin")
-	mustMkdir(t, dir)
-	path := filepath.Join(dir, "hypershift")
-	if err := os.Rename(filepath.Join(e.binDir, "hypershift"), path); err != nil {
-		t.Fatal(err)
-	}
-	return path
 }
 
 // run executes hyperctl with the given arguments and fails the test on error.
@@ -266,6 +237,8 @@ func (e *testEnv) runErr(t *testing.T, args ...string) (string, error) {
 	cmd := app.New(app.Deps{
 		AWS:           e.aws,
 		Azure:         e.azure,
+		Hypershift:    e.hypershift.cli,
+		LookPath:      e.hypershift.lookPath,
 		DefaultRegion: e.defaultRegion,
 		ReleasesURL:   e.releasesURL,
 		Stdout:        &out,
@@ -273,42 +246,6 @@ func (e *testEnv) runErr(t *testing.T, args ...string) (string, error) {
 	})
 	err := cmd.Run(context.Background(), append([]string{"hyperctl"}, args...))
 	return out.String(), err
-}
-
-// hypershiftCall is one recorded invocation of the fake hypershift.
-type hypershiftCall struct {
-	args       string
-	kubeconfig string
-}
-
-// hypershiftCalls reads the invocations recorded by the fake hypershift.
-func (e *testEnv) hypershiftCalls(t *testing.T) []hypershiftCall {
-	t.Helper()
-	dirs, err := filepath.Glob(filepath.Join(e.logDir, "hypershift-*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var calls []hypershiftCall
-	for _, dir := range dirs {
-		calls = append(calls, hypershiftCall{
-			args:       readFile(t, filepath.Join(dir, "args")),
-			kubeconfig: readFile(t, filepath.Join(dir, "kubeconfig")),
-		})
-	}
-	return calls
-}
-
-// hypershiftCall returns the recorded hypershift invocation whose arguments
-// start with prefix.
-func (e *testEnv) hypershiftCall(t *testing.T, prefix string) hypershiftCall {
-	t.Helper()
-	for _, call := range e.hypershiftCalls(t) {
-		if strings.HasPrefix(call.args, prefix) {
-			return call
-		}
-	}
-	t.Fatalf("no hypershift call with prefix %q in %v", prefix, e.hypershiftCalls(t))
-	return hypershiftCall{}
 }
 
 // fakeAWS is an in-memory AWS account.

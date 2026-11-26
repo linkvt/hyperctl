@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,7 +78,7 @@ func TestKubeconfigNamesEntriesAfterClusters(t *testing.T) {
 
 func TestKubeconfigWithoutHostedClusterPrintsMgmt(t *testing.T) {
 	env := newTestEnv(t)
-	t.Setenv("HYPERCTL_TEST_HYPERSHIFT_FAIL", "install")
+	env.hypershift.installErr = errors.New("hypershift install: exit status 1")
 	_, _ = env.runErr(t, "create",
 		"--release", "5.1.0-ec.0",
 		"--region", "eu-central-1",
@@ -258,7 +259,7 @@ type kubeconfigFile struct {
 
 func (e *testEnv) startHostedInstallation(t *testing.T) string {
 	t.Helper()
-	t.Setenv("HYPERCTL_TEST_HYPERSHIFT_FAIL", "create")
+	e.hypershift.createClusterErr = errors.New("hypershift create cluster: exit status 1")
 	if _, err := e.runErr(t, "create",
 		"--release", "5.1.0-ec.0",
 		"--region", "eu-central-1",

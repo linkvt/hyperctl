@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -12,6 +14,7 @@ import (
 	"github.com/linkvt/hyperctl/internal/app"
 	"github.com/linkvt/hyperctl/internal/awsaccount"
 	"github.com/linkvt/hyperctl/internal/azureaccount"
+	"github.com/linkvt/hyperctl/internal/hypershift"
 	"github.com/linkvt/hyperctl/internal/releases"
 )
 
@@ -35,8 +38,12 @@ func run(ctx context.Context) error {
 		return err
 	}
 	cmd := app.New(app.Deps{
-		AWS:           awsaccount.New(awsConfig),
-		Azure:         azureAccount,
+		AWS:   awsaccount.New(awsConfig),
+		Azure: azureAccount,
+		Hypershift: func(path, kubeconfig string, out io.Writer) app.Hypershift {
+			return hypershift.New(path, kubeconfig, out)
+		},
+		LookPath:      exec.LookPath,
 		DefaultRegion: awsConfig.Region,
 		ReleasesURL:   releases.DefaultURL,
 		Interactive:   term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())),

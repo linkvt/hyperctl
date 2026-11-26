@@ -7,6 +7,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/linkvt/hyperctl/internal/azureaccount"
+	"github.com/linkvt/hyperctl/internal/hypershift"
 )
 
 // AWSAccount are the AWS account operations hyperctl uses.
@@ -86,10 +87,31 @@ type AzureAccount interface {
 	AKSAdminKubeconfig(ctx context.Context, resourceGroup, name string) ([]byte, error)
 }
 
+// Hypershift are the hypershift CLI operations hyperctl uses, see the
+// hypershift package.
+type Hypershift interface {
+	// Version checks that the binary runs.
+	Version(ctx context.Context) error
+	Install(ctx context.Context, params hypershift.InstallParams) error
+	InstallAzure(ctx context.Context, params hypershift.InstallAzureParams) error
+	CreateCluster(ctx context.Context, params hypershift.CreateClusterParams) error
+	DestroyCluster(ctx context.Context, params hypershift.DestroyClusterParams) error
+	DestroyInfra(ctx context.Context, params hypershift.DestroyClusterParams) error
+	HostedKubeconfig(ctx context.Context, name string) ([]byte, error)
+	CreateAzureIAM(ctx context.Context, params hypershift.CreateAzureIAMParams) error
+	CreateAzureInfra(ctx context.Context, params hypershift.CreateAzureInfraParams) error
+	CreateAzureCluster(ctx context.Context, params hypershift.CreateAzureClusterParams) error
+}
+
 // Deps are the external dependencies of the hyperctl CLI.
 type Deps struct {
 	AWS   AWSAccount
 	Azure AzureAccount
+	// Hypershift returns the hypershift binary at path, running against the
+	// management cluster of kubeconfig and writing its output to out.
+	Hypershift func(path, kubeconfig string, out io.Writer) Hypershift
+	// LookPath finds a binary in PATH, see exec.LookPath.
+	LookPath func(file string) (string, error)
 	// DefaultRegion is the region of the active AWS profile, if any.
 	DefaultRegion string
 	// ReleasesURL is the base URL of the release controller.

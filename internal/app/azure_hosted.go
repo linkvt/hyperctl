@@ -42,7 +42,7 @@ var workloadIdentities = []string{
 // ensureAzureHostedCluster creates the workload identities, infrastructure,
 // role assignments and the hosted cluster with AutoNode and writes its
 // kubeconfig, unless it is already created.
-func ensureAzureHostedCluster(ctx context.Context, p progress, account AzureAccount, hs hypershift.CLI, dirs xdg.Dirs, opts createOptions, shared azureShared) error {
+func ensureAzureHostedCluster(ctx context.Context, p progress, account AzureAccount, hs Hypershift, dirs xdg.Dirs, opts createOptions, shared azureShared) error {
 	dir := hostedDir(dirs, opts.Name, opts.HostedName)
 	record, found, err := loadClusterRecord(dir)
 	if err != nil {

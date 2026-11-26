@@ -3,8 +3,7 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os/exec"
+	"io"
 
 	"github.com/urfave/cli/v3"
 
@@ -17,10 +16,10 @@ import (
 func resolveHypershift(ctx context.Context, cmd *cli.Command, deps Deps, dirs xdg.Dirs, cfg config) (string, error) {
 	path := flagOr(cmd, "hypershift", cfg.Hypershift)
 	if path == "" {
-		path, _ = exec.LookPath("hypershift")
+		path, _ = deps.LookPath("hypershift")
 	}
 	if path != "" {
-		return verifyHypershift(ctx, path)
+		return verifyHypershift(ctx, deps, path)
 	}
 	if !deps.Interactive {
 		return "", errors.New("hypershift binary not found in PATH, build it from github.com/openshift/hypershift (make build) and pass --hypershift or set hypershift in the config file")
@@ -30,7 +29,7 @@ func resolveHypershift(ctx context.Context, cmd *cli.Command, deps Deps, dirs xd
 	if err != nil {
 		return "", err
 	}
-	if path, err = verifyHypershift(ctx, path); err != nil {
+	if path, err = verifyHypershift(ctx, deps, path); err != nil {
 		return "", err
 	}
 	cfg.Hypershift = path
@@ -41,13 +40,13 @@ func resolveHypershift(ctx context.Context, cmd *cli.Command, deps Deps, dirs xd
 }
 
 // verifyHypershift expands the path and checks that the binary runs.
-func verifyHypershift(ctx context.Context, path string) (string, error) {
+func verifyHypershift(ctx context.Context, deps Deps, path string) (string, error) {
 	path, err := expandHome(path)
 	if err != nil {
 		return "", err
 	}
-	if out, err := exec.CommandContext(ctx, path, "--version").CombinedOutput(); err != nil {
-		return "", fmt.Errorf("running %s --version: %w\n%s", path, err, out)
+	if err := deps.Hypershift(path, "", io.Discard).Version(ctx); err != nil {
+		return "", err
 	}
 	return path, nil
 }

@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/linkvt/hyperctl/internal/azureaccount"
+	"github.com/linkvt/hyperctl/internal/hypershift"
 )
 
 const (
@@ -133,18 +134,14 @@ func TestCreateAzureInstallsHyperShiftOperatorWithExternalDNS(t *testing.T) {
 	if got := len(env.ocCalls(t, "apply --server-side -f https://")); got != 4 {
 		t.Errorf("expected 4 CRD applies, got %d", got)
 	}
-	call := env.hypershiftCall(t, "install ")
-	want := "install" +
-		" --pull-secret " + env.pullSecret +
-		" --limit-crd-install Azure" +
-		" --tech-preview-no-upgrade" +
-		" --enable-standalone-karpenter-operator" +
-		" --external-dns-provider azure" +
-		" --external-dns-credentials " + filepath.Join(env.home, ".local/share/hyperctl/azure/external-dns-credentials.json") +
-		" --external-dns-domain-filter " + testAzureDNSZone +
-		" --wait-until-available"
-	if call.args != want {
-		t.Errorf("hypershift args:\ngot:  %s\nwant: %s", call.args, want)
+	call := single(t, env.hypershift.azureInstalls)
+	want := hypershift.InstallAzureParams{
+		PullSecret:                 env.pullSecret,
+		ExternalDNSCredentialsFile: filepath.Join(env.home, ".local/share/hyperctl/azure/external-dns-credentials.json"),
+		ExternalDNSDomain:          testAzureDNSZone,
+	}
+	if call.params != want {
+		t.Errorf("hypershift install:\ngot:  %+v\nwant: %+v", call.params, want)
 	}
 	if want := filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/install/auth/kubeconfig"); call.kubeconfig != want {
 		t.Errorf("hypershift KUBECONFIG: got %q, want %q", call.kubeconfig, want)
@@ -160,40 +157,47 @@ func TestCreateAzureCreatesHostedCluster(t *testing.T) {
 	hostedDir := filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/hosted/test-mgmt-workload")
 	credentials := filepath.Join(env.home, ".local/share/hyperctl/azure/credentials.json")
 	issuer := "https://testerhyperctloidc.blob.core.windows.net/testerhyperctloidc"
-	for prefix, want := range map[string]string{
-		"create iam ": "create iam azure --name test-mgmt-workload --infra-id " + infraID +
-			" --azure-creds " + credentials +
-			" --location " + testAzureLocation +
-			" --resource-group-name tester-hyperctl" +
-			" --oidc-issuer-url " + issuer +
-			" --output-file " + filepath.Join(hostedDir, "workload-identities.json") +
-			" --enable-karpenter",
-		"create infra ": "create infra azure --name test-mgmt-workload --infra-id " + infraID +
-			" --azure-creds " + credentials +
-			" --base-domain " + testAzureBaseDomain +
-			" --location " + testAzureLocation +
-			" --workload-identities-file " + filepath.Join(hostedDir, "workload-identities.json") +
-			" --dns-zone-rg-name os4-common" +
-			" --output-file " + filepath.Join(hostedDir, "infra-output.yaml"),
-		"create cluster ": "create cluster azure --name test-mgmt-workload --infra-id " + infraID +
-			" --azure-creds " + credentials +
-			" --location " + testAzureLocation +
-			" --base-domain " + testAzureBaseDomain +
-			" --dns-zone-rg-name os4-common" +
-			" --pull-secret " + env.pullSecret +
-			" --release-image quay.io/openshift-release-dev/ocp-release:5.1.0-ec.0-x86_64" +
-			" --node-pool-replicas 2" +
-			" --oidc-issuer-url " + issuer +
-			" --sa-token-issuer-private-key-path " + filepath.Join(env.home, ".local/share/hyperctl/azure/serviceaccount-signer.private") +
-			" --infra-json " + filepath.Join(hostedDir, "infra-output.yaml") +
-			" --diagnostics-storage-account-type Managed" +
-			" --external-dns-domain " + testAzureDNSZone +
-			" --annotations hypershift.openshift.io/pod-security-admission-label-override=baseline" +
-			" --auto-node --wait --timeout 45m0s --generate-ssh",
-	} {
-		if got := env.hypershiftCall(t, prefix).args; got != want {
-			t.Errorf("hypershift %s:\ngot:  %s\nwant: %s", prefix, got, want)
-		}
+	wantIAM := hypershift.CreateAzureIAMParams{
+		Name:            "test-mgmt-workload",
+		InfraID:         infraID,
+		CredentialsFile: credentials,
+		Location:        testAzureLocation,
+		ResourceGroup:   "tester-hyperctl",
+		OIDCIssuerURL:   issuer,
+		OutputFile:      filepath.Join(hostedDir, "workload-identities.json"),
+	}
+	if got := single(t, env.hypershift.azureIAMs).params; got != wantIAM {
+		t.Errorf("hypershift create iam:\ngot:  %+v\nwant: %+v", got, wantIAM)
+	}
+	wantInfra := hypershift.CreateAzureInfraParams{
+		Name:                   "test-mgmt-workload",
+		InfraID:                infraID,
+		CredentialsFile:        credentials,
+		BaseDomain:             testAzureBaseDomain,
+		Location:               testAzureLocation,
+		WorkloadIdentitiesFile: filepath.Join(hostedDir, "workload-identities.json"),
+		DNSZoneResourceGroup:   "os4-common",
+		OutputFile:             filepath.Join(hostedDir, "infra-output.yaml"),
+	}
+	if got := single(t, env.hypershift.azureInfras).params; got != wantInfra {
+		t.Errorf("hypershift create infra:\ngot:  %+v\nwant: %+v", got, wantInfra)
+	}
+	wantCluster := hypershift.CreateAzureClusterParams{
+		Name:                 "test-mgmt-workload",
+		InfraID:              infraID,
+		CredentialsFile:      credentials,
+		Location:             testAzureLocation,
+		BaseDomain:           testAzureBaseDomain,
+		DNSZoneResourceGroup: "os4-common",
+		PullSecret:           env.pullSecret,
+		ReleaseImage:         "quay.io/openshift-release-dev/ocp-release:5.1.0-ec.0-x86_64",
+		OIDCIssuerURL:        issuer,
+		SigningKeyFile:       filepath.Join(env.home, ".local/share/hyperctl/azure/serviceaccount-signer.private"),
+		InfraFile:            filepath.Join(hostedDir, "infra-output.yaml"),
+		ExternalDNSDomain:    testAzureDNSZone,
+	}
+	if got := single(t, env.hypershift.azureClusters).params; got != wantCluster {
+		t.Errorf("hypershift create cluster:\ngot:  %+v\nwant: %+v", got, wantCluster)
 	}
 	if got := readFile(t, filepath.Join(hostedDir, "kubeconfig")); !strings.Contains(got, "api.hosted.fake") {
 		t.Errorf("expected the hosted kubeconfig, got:\n%s", got)
@@ -240,13 +244,7 @@ func TestCreateAzureReusesSharedResources(t *testing.T) {
 	if len(env.azure.aksClusters) != 1 {
 		t.Errorf("expected the AKS cluster to be reused, got %d creations", len(env.azure.aksClusters))
 	}
-	var iamCreates int
-	for _, call := range env.hypershiftCalls(t) {
-		if strings.HasPrefix(call.args, "create iam ") {
-			iamCreates++
-		}
-	}
-	if iamCreates != 1 {
+	if iamCreates := len(env.hypershift.azureIAMs); iamCreates != 1 {
 		t.Errorf("expected the hosted cluster to be reused, got %d IAM creations", iamCreates)
 	}
 }
@@ -339,8 +337,8 @@ func TestCreateAzureUsesSharedResourcesFromConfig(t *testing.T) {
 	if _, found := env.azure.oidcIssuers["vlinkautonodeoidc"]; !found {
 		t.Errorf("expected the configured OIDC storage account, got %v", env.azure.oidcIssuers)
 	}
-	if !strings.Contains(env.hypershiftCall(t, "install ").args, "--external-dns-domain-filter vlink-mgmt.azure.autoscaling-dev.devcluster.openshift.com") {
-		t.Errorf("expected the configured DNS zone, got %s", env.hypershiftCall(t, "install ").args)
+	if got := single(t, env.hypershift.azureInstalls).params.ExternalDNSDomain; got != "vlink-mgmt.azure.autoscaling-dev.devcluster.openshift.com" {
+		t.Errorf("expected the configured DNS zone, got %s", got)
 	}
 }
 

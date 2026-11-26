@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"errors"
 	"path/filepath"
 	"regexp"
 	"testing"
@@ -85,7 +86,7 @@ func TestStatusShowsIncompleteInstallation(t *testing.T) {
 
 func TestStatusShowsHostedOnlyCleanupForIncompleteHostedInstallation(t *testing.T) {
 	env := newTestEnv(t)
-	t.Setenv("HYPERCTL_TEST_HYPERSHIFT_FAIL", "create")
+	env.hypershift.createClusterErr = errors.New("hypershift create cluster: exit status 1")
 	if _, err := env.runErr(t, "create",
 		"--release", "5.1.0-ec.0",
 		"--region", "eu-central-1",
