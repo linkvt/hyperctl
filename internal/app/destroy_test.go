@@ -337,6 +337,16 @@ func TestDestroySharedAWSResources(t *testing.T) {
 	}
 }
 
+func TestDestroySharedRejectsFurtherArguments(t *testing.T) {
+	env := newTestEnv(t)
+
+	_, err := env.runErr(t, "destroy", "shared", "bogus", "--platform", "aws", "--yes")
+
+	if err == nil || !strings.Contains(err.Error(), `unexpected argument "bogus"`) {
+		t.Errorf("expected the argument to be rejected, got %v", err)
+	}
+}
+
 func TestDestroySharedRequiresPlatform(t *testing.T) {
 	env := newTestEnv(t)
 

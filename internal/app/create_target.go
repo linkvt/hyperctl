@@ -124,9 +124,9 @@ func (t createTarget) checkFlags(cmd *cli.Command) error {
 	}
 	if cmd.IsSet("release") && !t.creates() {
 		if t.setup.hosted() {
-			return fmt.Errorf("--release only applies to clusters that create creates, %s and %s exist", t.mgmt.clusterRef, t.hosted.clusterRef)
+			return fmt.Errorf("--release only applies to clusters this run creates, %s and %s exist", t.mgmt.clusterRef, t.hosted.clusterRef)
 		}
-		return fmt.Errorf("--release only applies to clusters that create creates, %s exists", t.mgmt.clusterRef)
+		return fmt.Errorf("--release only applies to clusters this run creates, %s exists", t.mgmt.clusterRef)
 	}
 	return nil
 }

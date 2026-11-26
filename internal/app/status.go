@@ -25,6 +25,9 @@ func statusCommand(deps Deps) *cli.Command {
 // cluster with its hosted clusters, a hosted cluster with its management
 // cluster.
 func runStatus(ctx context.Context, cmd *cli.Command, cluster ClusterAPI, w io.Writer, p progress) error {
+	if err := noArguments(cmd); err != nil {
+		return err
+	}
 	sel, err := selectCluster(cmd)
 	if err != nil {
 		return err
@@ -36,11 +39,9 @@ func runStatus(ctx context.Context, cmd *cli.Command, cluster ClusterAPI, w io.W
 	}
 
 	if !mgmt.recorded {
-		st, err := loadState(sel.dirs.State)
-		if err != nil {
-			return err
-		}
-		_, _ = fmt.Fprintf(w, "%s %s\n", st.Setup.clusterTitle(), mgmt.mgmt)
+		// Without a record, nothing tells whether it was to get the
+		// HyperShift operator.
+		_, _ = fmt.Fprintf(w, "Cluster %s\n", mgmt.mgmt)
 		field(w, "Phase", "not created")
 		return nil
 	}

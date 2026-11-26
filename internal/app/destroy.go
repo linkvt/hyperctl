@@ -33,6 +33,9 @@ func destroyCommand(deps Deps) *cli.Command {
 
 func runDestroy(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if cmd.Args().First() == destroyShared {
+		if cmd.Args().Len() > 1 {
+			return fmt.Errorf("unexpected argument %q after shared", cmd.Args().Get(1))
+		}
 		if cmd.IsSet("cluster") {
 			return errors.New("--cluster does not apply to destroy shared")
 		}

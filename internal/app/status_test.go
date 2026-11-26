@@ -179,3 +179,37 @@ func TestStatusWithoutClusters(t *testing.T) {
 		t.Errorf("got %v, want %q", err, want)
 	}
 }
+
+// TestStatusCallsClusterWithoutRecordCluster expects a cluster whose
+// creation never started not to take its kind from the setup of another
+// create.
+func TestStatusCallsClusterWithoutRecordCluster(t *testing.T) {
+	env := newTestEnv(t)
+	if _, err := env.runErr(t, "create", "--setup", "standalone",
+		"--release", "5.1.0-ec.0",
+		"--region", "eu-central-1",
+		"--name", "test-new",
+		"--pull-secret", env.pullSecret,
+		"--ssh-key", filepath.Join(env.home, "missing.pub"),
+	); err == nil {
+		t.Fatal("expected create to fail without the SSH key")
+	}
+	env.run(t, "create", "--setup", "hosted", "--release", "5.1.0-ec.0", "--region", "eu-central-1", "--name", "test-mgmt", "--pull-secret", env.pullSecret)
+
+	out := env.run(t, "status", "--cluster", "test-new")
+
+	if want := "Cluster test-new\n  Phase:      not created\n"; out != want {
+		t.Errorf("got %q, want %q", out, want)
+	}
+}
+
+func TestStatusRejectsClusterArgument(t *testing.T) {
+	env := newTestEnv(t)
+	env.createClusters(t)
+
+	_, err := env.runErr(t, "status", "test-mgmt")
+
+	if err == nil || !strings.Contains(err.Error(), "select the cluster with --cluster <name>") {
+		t.Errorf("expected a hint to --cluster, got %v", err)
+	}
+}

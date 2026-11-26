@@ -69,10 +69,25 @@ func writeYAML(path string, v any) error {
 	return writeFile(path, b)
 }
 
-// writeFile writes a private file, creating its parent directories.
+// writeFile writes a private file, creating its parent directories. It
+// replaces the file at once, so that a concurrent run never reads it
+// partly written.
 func writeFile(path string, content []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(path, content, 0o600)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if _, err := tmp.Write(content); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }

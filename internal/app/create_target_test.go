@@ -271,7 +271,7 @@ func TestCreateRejectsFlagsThatDifferFromExistingCluster(t *testing.T) {
 		},
 		"release without a cluster to create": {
 			args: []string{"--release", "5.2.0"},
-			want: "--release only applies to clusters that create creates, management cluster test-mgmt and hosted cluster test-mgmt-workload exist",
+			want: "--release only applies to clusters this run creates, management cluster test-mgmt and hosted cluster test-mgmt-workload exist",
 		},
 	}
 	for name, tc := range tests {
@@ -285,6 +285,36 @@ func TestCreateRejectsFlagsThatDifferFromExistingCluster(t *testing.T) {
 				t.Errorf("got %v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestCreateRejectsReleaseForExistingClusterWithoutHostedCluster(t *testing.T) {
+	env := newTestEnv(t)
+	env.run(t, "create", "--setup", "management", "--release", "5.1.0-ec.0", "--region", "eu-central-1", "--name", "test-mgmt", "--pull-secret", env.pullSecret)
+
+	_, err := env.runErr(t, "create", "--release", "5.2.0")
+
+	if want := "--release only applies to clusters this run creates, management cluster test-mgmt exists"; err == nil || err.Error() != want {
+		t.Errorf("got %v, want %q", err, want)
+	}
+}
+
+// TestCreateWithReleaseReachesIncompleteCluster expects a cluster whose
+// creation did not complete to count as one the run creates, so that
+// re-running the same command reports the incomplete cluster.
+func TestCreateWithReleaseReachesIncompleteCluster(t *testing.T) {
+	env := newTestEnv(t)
+	args := []string{"create", "--release", "5.1.0-ec.0", "--region", "eu-central-1", "--name", "test-mgmt", "--pull-secret", env.pullSecret}
+	env.hypershift.createClusterErr = errors.New("hypershift create cluster: exit status 1")
+	if _, err := env.runErr(t, args...); err == nil {
+		t.Fatal("expected failing hosted cluster creation to fail create")
+	}
+	env.hypershift.createClusterErr = nil
+
+	_, err := env.runErr(t, args...)
+
+	if err == nil || !strings.Contains(err.Error(), "previous creation of hosted cluster test-mgmt-workload did not complete") {
+		t.Errorf("expected the incomplete hosted cluster error, got %v", err)
 	}
 }
 
