@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"sigs.k8s.io/yaml"
-
 	"github.com/linkvt/hyperctl/internal/azureaccount"
 	"github.com/linkvt/hyperctl/internal/hypershift"
 )
@@ -254,17 +252,9 @@ func TestCreateAzureRemembersLocation(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)
 
-	var cfg struct {
-		Azure struct {
-			Location string `json:"location"`
-		} `json:"azure"`
-	}
-	content := readFile(t, filepath.Join(env.home, ".config/hyperctl/config.yaml"))
-	if err := yaml.Unmarshal([]byte(content), &cfg); err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Azure.Location != testAzureLocation {
-		t.Errorf("remembered location: got %q, want %q in config:\n%s", cfg.Azure.Location, testAzureLocation, content)
+	// The config holds what the user configured, the last used location is state.
+	if _, err := os.Stat(filepath.Join(env.home, ".config/hyperctl/config.yaml")); !os.IsNotExist(err) {
+		t.Errorf("expected no config file, got %v", err)
 	}
 	env.run(t, "destroy", "--yes")
 
@@ -284,16 +274,22 @@ func TestCreateAzureDefaultsLocation(t *testing.T) {
 	if got, want := env.azure.aksClusters[0].Location, "westus3"; got != want {
 		t.Errorf("location of the cluster: got %q, want %q", got, want)
 	}
-	var cfg struct {
-		Azure struct {
-			Location string `json:"location"`
-		} `json:"azure"`
-	}
-	if err := yaml.Unmarshal([]byte(readFile(t, filepath.Join(env.home, ".config/hyperctl/config.yaml"))), &cfg); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := cfg.Azure.Location, "westus3"; got != want {
-		t.Errorf("saved location: got %q, want %q", got, want)
+}
+
+// TestCreateAzureConfiguredLocationWins expects the location from the config
+// file to take precedence over the last used one.
+func TestCreateAzureConfiguredLocationWins(t *testing.T) {
+	env := newTestEnv(t)
+	configPath := filepath.Join(env.home, ".config", "hyperctl", "config.yaml")
+	mustMkdir(t, filepath.Dir(configPath))
+	writeFile(t, configPath, "azure:\n  location: westus3\n", 0o600)
+	env.run(t, "create", "--platform", "azure", "--management-only", "--release", "5.1.0-ec.0", "--region", testAzureLocation, "--name", "first", "--pull-secret", env.pullSecret)
+	env.run(t, "destroy", "--yes")
+
+	env.run(t, "create", "--platform", "azure", "--management-only", "--release", "5.1.0-ec.0", "--name", "second", "--pull-secret", env.pullSecret)
+
+	if got, want := env.azure.aksClusters[1].Location, "westus3"; got != want {
+		t.Errorf("location of the second cluster: got %q, want %q", got, want)
 	}
 }
 

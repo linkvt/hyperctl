@@ -50,7 +50,7 @@ func createCommand(deps Deps) *cli.Command {
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "release", Usage: "OCP release version, e.g. 5.1.0-ec.0, or release image pull spec (default: last used)"},
 			&cli.StringFlag{Name: "platform", Usage: "Cloud platform of the clusters, aws or azure (default: last used, or aws)"},
-			&cli.StringFlag{Name: "region", Usage: "AWS region or Azure location, e.g. westus3 or germanywestcentral (default: AWS profile region, last used Azure location, or " + defaultAzureLocation + ")"},
+			&cli.StringFlag{Name: "region", Usage: "AWS region or Azure location, e.g. westus3 or germanywestcentral (default: last used, AWS profile region or " + defaultAzureLocation + ")"},
 			&cli.StringFlag{Name: "base-domain", Usage: "Base domain with a public DNS zone (default: " + defaultBaseDomain + ", on Azure " + defaultAzureBaseDomain + ")"},
 			&cli.StringFlag{Name: "name", Usage: "Management cluster name (default: $USER-karpenter)"},
 			&cli.StringFlag{Name: "pull-secret", Usage: "Path to the pull secret file (default: ~/.openshift/pull-secret-latest.json)"},
@@ -123,6 +123,7 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	}
 	st.LastRelease = opts.Release
 	st.ManagementOnly = opts.ManagementOnly
+	st.LastRegions.AWS = opts.Region
 	if err := saveState(dirs.State, st); err != nil {
 		return err
 	}
@@ -366,7 +367,7 @@ func defaultCreateOptions(deps Deps, dirs xdg.Dirs, st state, cfg config, platfo
 	opts := createOptions{
 		ManagementOnly: st.ManagementOnly,
 		Release:        st.LastRelease,
-		Region:         cmp.Or(cfg.Region, deps.DefaultRegion),
+		Region:         cmp.Or(cfg.Region, st.LastRegions.AWS, deps.DefaultRegion),
 		BaseDomain:     cmp.Or(cfg.BaseDomain, defaultBaseDomain),
 		PullSecret:     cmp.Or(cfg.PullSecret, filepath.Join(home, ".openshift", "pull-secret-latest.json")),
 		OIDCBucket:     cfg.OIDCBucket,
@@ -377,7 +378,7 @@ func defaultCreateOptions(deps Deps, dirs xdg.Dirs, st state, cfg config, platfo
 		opts.Workers = *cfg.MgmtWorkers
 	}
 	if platform == platformAzure {
-		opts.Region = cmp.Or(cfg.Azure.Location, defaultAzureLocation)
+		opts.Region = cmp.Or(cfg.Azure.Location, st.LastRegions.Azure, defaultAzureLocation)
 		opts.BaseDomain = cmp.Or(cfg.Azure.BaseDomain, defaultAzureBaseDomain)
 		opts.OIDCBucket = ""
 		opts.InstanceType = cmp.Or(cfg.Azure.MgmtVMSize, defaultAzureVMSize)

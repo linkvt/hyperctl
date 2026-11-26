@@ -62,15 +62,8 @@ func runCreateAzure(ctx context.Context, p progress, cmd *cli.Command, deps Deps
 	}
 	st.LastRelease = opts.Release
 	st.ManagementOnly = opts.ManagementOnly
+	st.LastRegions.Azure = opts.Region
 	if err := saveState(dirs.State, st); err != nil {
-		return err
-	}
-	// Reload the config, resolving the options may have saved it.
-	if cfg, err = loadConfig(dirs.Config); err != nil {
-		return err
-	}
-	cfg.Azure.Location = opts.Region
-	if err := saveConfig(dirs.Config, cfg); err != nil {
 		return err
 	}
 

@@ -15,6 +15,15 @@ type state struct {
 	HostedCluster  string `json:"hostedCluster,omitempty"`
 	LastRelease    string `json:"lastRelease,omitempty"`
 	ManagementOnly bool   `json:"managementOnly,omitempty"`
+	// LastRegions are the regions of the last created clusters, the default
+	// unless the config file sets one.
+	LastRegions lastRegions `json:"lastRegions,omitzero"`
+}
+
+// lastRegions holds the last used region per platform.
+type lastRegions struct {
+	AWS   string `json:"aws,omitempty"`
+	Azure string `json:"azure,omitempty"`
 }
 
 // Platforms of the clusters.

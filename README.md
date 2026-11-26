@@ -97,7 +97,7 @@ Instances of stopped clusters get pruned, which leaves broken clusters and Route
 `create --platform azure` creates an AKS management cluster and an Azure hosted cluster with AutoNode, following a verified manual setup.
 An existing management cluster determines the platform and `create` reports it; otherwise `create` asks for it.
 
-1. Check the Azure login (`az account show`) and that the location offers the node VM size, by default `Standard_D4s_v5`, without restrictions; the location defaults to `westus3`
+1. Check the Azure login (`az account show`) and that the location offers the node VM size, by default `Standard_D4s_v5`, without restrictions; the location defaults to the last used one, or `westus3`
 2. Create or reuse the resources that all clusters share, see below
 3. Create an AKS cluster with 3 nodes in 2 zones in resource group `<name>-rg` (about 10 minutes)
 4. Install the Prometheus and Route CRDs and the HyperShift operator with External DNS and the standalone karpenter-operator, which Azure AutoNode requires
@@ -131,10 +131,11 @@ hyperctl follows the XDG Base Directory Specification on macOS and Linux:
 |---|---|---|
 | Config | `~/.config/hyperctl/config.yaml` | User defaults, see below |
 | Data | `~/.local/share/hyperctl` | Installer directories, hosted cluster kubeconfigs, needed to destroy clusters |
-| State | `~/.local/state/hyperctl` | Current cluster, last used release |
+| State | `~/.local/state/hyperctl` | Current cluster, last used release and regions |
 | Cache | `~/.cache/hyperctl` | `openshift-install` binaries per release |
 
 Config values override built-in defaults, flags override config values.
+Without a region in the config, `create` uses the last used region of the platform.
 The SSH key is asked once and saved; `sshKey: ""` disables it.
 
 ```yaml
@@ -147,7 +148,7 @@ oidcBucket: myuser-hypershift-oidc
 mgmtInstanceType: t3a.xlarge
 mgmtWorkers: 0
 hypershift: ~/repos/openshift/hypershift/bin/hypershift
-# Azure clusters, location is saved after each create
+# Azure clusters
 azure:
   location: germanywestcentral
   baseDomain: azure.autoscaling-dev.devcluster.openshift.com

@@ -66,6 +66,29 @@ func TestCreateRunsInstallerWithReleaseAndInstallConfig(t *testing.T) {
 	}
 }
 
+func TestCreateRemembersRegion(t *testing.T) {
+	env := newTestEnv(t)
+	env.defaultRegion = "us-east-2"
+	env.run(t, "create", "--release", "5.1.0-ec.0", "--region", "eu-west-1", "--name", "first", "--pull-secret", env.pullSecret)
+	env.run(t, "destroy", "--yes")
+
+	env.run(t, "create", "--release", "5.1.0-ec.0", "--name", "second", "--pull-secret", env.pullSecret)
+
+	var installConfig struct {
+		Platform struct {
+			AWS struct {
+				Region string `json:"region"`
+			} `json:"aws"`
+		} `json:"platform"`
+	}
+	if err := yaml.Unmarshal([]byte(env.images.creates[1].installConfig), &installConfig); err != nil {
+		t.Fatalf("parsing install-config: %v", err)
+	}
+	if got, want := installConfig.Platform.AWS.Region, "eu-west-1"; got != want {
+		t.Errorf("region of the second cluster: got %q, want %q", got, want)
+	}
+}
+
 func TestCreateUsesDefaultsForMissingValues(t *testing.T) {
 	env := newTestEnv(t)
 	env.defaultRegion = "us-east-2"
