@@ -39,13 +39,13 @@ func createCommand(deps Deps) *cli.Command {
 		Usage: "Create the management cluster",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "release", Usage: "OCP release version, e.g. 5.1.0-ec.0, or release image pull spec (default: last used)"},
-			&cli.StringFlag{Name: "platform", Usage: "Cloud platform of the clusters, aws or azure (default: last used, or aws)"},
+			&cli.StringFlag{Name: "platform", Usage: "Cloud platform of the clusters, aws or azure (default: the platform of the management cluster, otherwise asked for, or aws)"},
 			&cli.StringFlag{Name: "region", Usage: "AWS region or Azure location, e.g. westus3 or germanywestcentral (default: last used, AWS profile region or " + defaultAzureLocation + ")"},
 			&cli.StringFlag{Name: "base-domain", Usage: "Base domain with a public DNS zone (default: " + defaultBaseDomain + ", on Azure " + defaultAzureBaseDomain + ")"},
 			&cli.StringFlag{Name: "name", Usage: "Management cluster name (default: $USER-karpenter)"},
 			&cli.StringFlag{Name: "pull-secret", Usage: "Path to the pull secret file (default: ~/.openshift/pull-secret-latest.json)"},
 			&cli.StringFlag{Name: "ssh-key", Usage: "Path to an SSH public key for node access (optional)"},
-			&cli.BoolFlag{Name: "yes", Usage: "Do not ask for confirmation, also not for deleting DNS leftovers of previous clusters"},
+			&cli.BoolFlag{Name: "yes", Usage: "Do not ask anything: use the defaults for values not given as flags, skip the confirmation and delete DNS leftovers of previous clusters"},
 			&cli.BoolFlag{Name: "management-only", Usage: "Create the management cluster and install the HyperShift operator without creating a hosted cluster"},
 			&cli.BoolFlag{Name: "standalone-karpenter-operator", Value: true, Usage: "Run the standalone karpenter-operator in hosted clusters, =false (AWS only) runs the one embedded in the HyperShift operator image"},
 			&cli.StringFlag{Name: "hosted-name", Usage: "Hosted cluster name (default: <name>-workload)"},
@@ -161,8 +161,8 @@ func requireTrackedClusters(st state, opts createOptions) error {
 	return nil
 }
 
-// resolveCreateOptions takes values from flags, prompts for missing ones when
-// interactive and falls back to defaults otherwise. The SSH key is only asked
+// resolveCreateOptions takes values from flags, prompts for missing ones if it
+// may prompt and falls back to defaults otherwise. The SSH key is only asked
 // once and then saved to the config file.
 func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, deps Deps, dirs xdg.Dirs, clusters clusterStore, st state, cfg config, platformName string, run platformCreate) (createOptions, error) {
 	defaults, err := defaultCreateOptions(clusters, st, cfg, run)
@@ -184,15 +184,13 @@ func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, dep
 	if cmd.IsSet("management-only") {
 		opts.ManagementOnly = cmd.Bool("management-only")
 	}
-	if deps.Interactive {
+	if prompts(cmd, deps) {
 		askSSHKey := !cmd.IsSet("ssh-key") && cfg.SSHKey == nil
 		if err := promptCreateOptions(ctx, p, cmd, releases.Client{BaseURL: deps.ReleasesURL}, run, &opts, askSSHKey); err != nil {
 			return createOptions{}, err
 		}
-		if !cmd.Bool("yes") {
-			if err := confirmCreateOptions(ctx, platformName, run, opts); err != nil {
-				return createOptions{}, err
-			}
+		if err := confirmCreateOptions(ctx, platformName, run, opts); err != nil {
+			return createOptions{}, err
 		}
 		if askSSHKey {
 			cfg.SSHKey = &opts.SSHKey

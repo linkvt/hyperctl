@@ -46,6 +46,9 @@ type testEnv struct {
 	azure         *fakeAzure
 	defaultRegion string
 	releasesURL   string
+	// interactive runs hyperctl as in a terminal. Prompts fail in tests, as
+	// they find no terminal.
+	interactive bool
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -97,6 +100,7 @@ func (e *testEnv) runErr(t *testing.T, args ...string) (string, error) {
 		Cluster:       e.cluster,
 		DefaultRegion: e.defaultRegion,
 		ReleasesURL:   e.releasesURL,
+		Interactive:   e.interactive,
 		Stdout:        &out,
 		Stderr:        io.Discard,
 	})

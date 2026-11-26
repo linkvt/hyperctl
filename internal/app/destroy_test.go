@@ -292,6 +292,19 @@ func TestDestroySharedRequiresPlatform(t *testing.T) {
 	}
 }
 
+// TestDestroySharedWithYesRequiresPlatform expects --yes to fail instead of
+// asking for the platform in a terminal.
+func TestDestroySharedWithYesRequiresPlatform(t *testing.T) {
+	env := newTestEnv(t)
+	env.interactive = true
+
+	_, err := env.runErr(t, "destroy", "shared", "--yes")
+
+	if err == nil || !strings.Contains(err.Error(), "--platform") {
+		t.Errorf("expected an error asking for --platform, got %v", err)
+	}
+}
+
 // TestDestroySharedIgnoresClustersOfOtherPlatforms destroys the shared Azure
 // resources while an AWS management cluster exists.
 func TestDestroySharedIgnoresClustersOfOtherPlatforms(t *testing.T) {

@@ -76,7 +76,7 @@ func newPlatform(name string, deps Deps, dirs xdg.Dirs, clusters clusterStore) (
 }
 
 // resolvePlatform returns the platform of the tracked management cluster, or
-// the one from the flag, or asks for it when interactive.
+// the one from the flag, or asks for it if it may prompt.
 func resolvePlatform(ctx context.Context, p progress, cmd *cli.Command, deps Deps, clusters clusterStore, st state) (string, error) {
 	platform := platformAWS
 	if cmd.IsSet("platform") {
@@ -99,7 +99,7 @@ func resolvePlatform(ctx context.Context, p progress, cmd *cli.Command, deps Dep
 			return record.Platform, nil
 		}
 	}
-	if deps.Interactive && !cmd.IsSet("platform") {
+	if prompts(cmd, deps) && !cmd.IsSet("platform") {
 		return promptPlatform(ctx, platform)
 	}
 	return platform, nil
