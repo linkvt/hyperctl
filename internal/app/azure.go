@@ -246,3 +246,39 @@ func (a azurePlatform) destroyHosted(ctx context.Context, p progress, hs Hypersh
 func (a azurePlatform) destroyMgmt(ctx context.Context, p progress, _ bool, name string) error {
 	return destroyAKSCluster(ctx, p, a.deps.Azure, a.clusters, name)
 }
+
+// destroyShared destroys the service principals, the delegation of the
+// External DNS zone and the shared resource group.
+func (a azurePlatform) destroyShared(ctx context.Context, p progress, yes bool) error {
+	cfg, err := loadConfig(a.dirs.Config)
+	if err != nil {
+		return err
+	}
+	var subscription azureaccount.Subscription
+	err = p.wait(ctx, "Checking the Azure login", func(ctx context.Context) error {
+		var err error
+		subscription, err = a.deps.Azure.Subscription(ctx)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	shared, err := newAzureShared(a.dirs, cfg, subscription, cmp.Or(cfg.Azure.BaseDomain, defaultAzureBaseDomain), cfg.Azure.Location)
+	if err != nil {
+		return err
+	}
+	if !yes {
+		if !a.deps.Interactive {
+			return errors.New("destroying the shared Azure resources requires confirmation, pass --yes")
+		}
+		if err := confirmDestroy(ctx, []string{
+			"service principals " + shared.ServicePrincipal + " and " + shared.ExternalDNSServicePrincipal,
+			"NS record " + shared.delegationRecord() + " in " + shared.BaseDomain,
+			"resource group " + shared.ResourceGroup + " with the OIDC issuer and DNS zone " + shared.DNSZone,
+		}); err != nil {
+			return err
+		}
+	}
+	p.step("Shared Azure resources in subscription %s", subscription.Name)
+	return destroyAzureShared(ctx, p, a.deps.Azure, a.dirs, shared)
+}

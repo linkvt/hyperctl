@@ -77,7 +77,7 @@ Set `--workers=0` to install a three-node compact management cluster without a w
 | `hyperctl create` | Create the management cluster and optionally its hosted cluster, skipping an installed management cluster |
 | `hyperctl status` | Show the clusters, whether the management cluster responds and the hosted cluster is available |
 | `hyperctl kubeconfig [hosted\|mgmt]` | Print the kubeconfig paths of both clusters for `KUBECONFIG`, or of one |
-| `hyperctl destroy [all\|hosted\|shared]` | Destroy the hosted and, by default, the management cluster, or the shared Azure resources |
+| `hyperctl destroy [all\|hosted\|shared]` | Destroy the hosted and, by default, the management cluster, or with `shared --platform aws\|azure` the shared resources of a platform |
 | `hyperctl image karpenter-operator\|karpenter-provider <image>` | Override the Karpenter operator or Karpenter provider image of the hosted cluster (`--reset` to remove) |
 | `hyperctl releases [stream]` | List release streams or the accepted releases of a stream (`--all` for all) |
 | `hyperctl cache clean` | Remove cached installer binaries |
@@ -117,7 +117,8 @@ Shared resources, created when missing on every `create` and kept when destroyin
 | Service principal of External DNS with Reader and Contributor on its zone | `$USER-hyperctl-external-dns` |
 
 The service principal credentials and the signing key are kept in `~/.local/share/hyperctl/azure`.
-`hyperctl destroy shared` deletes all of them once no management cluster is left.
+`hyperctl destroy shared --platform azure` deletes all of them once no Azure management cluster is left.
+On AWS, `destroy shared --platform aws` deletes nothing: the OIDC bucket is kept, and the EC2 Spot service-linked role belongs to the whole account.
 
 `destroy` runs `hypershift destroy cluster azure`, which deletes the HostedCluster and the resource groups of the hosted cluster (`hypershift destroy infra azure` if the management cluster is unreachable). hyperctl then deletes the External DNS records, the `*.apps` record of the hosted cluster in the base domain zone (only if owned by its infra ID) and the role assignment of the ingress identity on that zone, runs `hypershift destroy iam azure` for the workload identities and deletes the resource group of the AKS cluster.
 

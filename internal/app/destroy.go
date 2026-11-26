@@ -1,14 +1,12 @@
 package app
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/linkvt/hyperctl/internal/azureaccount"
 	"github.com/linkvt/hyperctl/internal/xdg"
 )
 
@@ -21,11 +19,12 @@ const (
 func destroyCommand(deps Deps) *cli.Command {
 	return &cli.Command{
 		Name:      "destroy",
-		Usage:     "Destroy the hosted cluster and, unless only hosted is given, the management cluster, or the shared Azure resources",
+		Usage:     "Destroy the hosted cluster and, unless only hosted is given, the management cluster, or the shared resources of a platform",
 		ArgsUsage: "[all|hosted|shared]",
 		Flags: []cli.Flag{
 			&cli.BoolFlag{Name: "yes", Usage: "Do not ask for confirmation"},
 			&cli.StringFlag{Name: "hypershift", Usage: "Path to the hypershift binary (default: from PATH)"},
+			&cli.StringFlag{Name: "platform", Usage: "Platform of the shared resources to destroy, aws or azure"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return runDestroy(ctx, cmd, deps)
@@ -52,6 +51,9 @@ func runDestroy(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	}
 	if scope == destroyShared {
 		return runDestroyShared(ctx, cmd, deps, dirs, st)
+	}
+	if cmd.IsSet("platform") {
+		return errors.New("--platform only applies to destroy shared")
 	}
 	if st.MgmtCluster == "" {
 		return errors.New("no clusters to destroy")
@@ -106,44 +108,41 @@ func runDestroy(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	return saveState(dirs.State, st)
 }
 
-// runDestroyShared destroys the Azure resources shared by all clusters,
-// which requires that no clusters are left.
+// runDestroyShared destroys the resources that the clusters of a platform
+// share, which requires that no cluster of the platform is left.
 func runDestroyShared(ctx context.Context, cmd *cli.Command, deps Deps, dirs xdg.Dirs, st state) error {
+	platformName, err := sharedPlatform(ctx, cmd, deps)
+	if err != nil {
+		return err
+	}
+	clusters := newClusterStore(dirs)
+	platform, err := newPlatform(platformName, deps, dirs, clusters)
+	if err != nil {
+		return err
+	}
 	if st.MgmtCluster != "" {
-		return fmt.Errorf("management cluster %s exists, destroy it first", st.MgmtCluster)
-	}
-	cfg, err := loadConfig(dirs.Config)
-	if err != nil {
-		return err
-	}
-	p := progress{w: cmd.Root().Writer, interactive: deps.Interactive}
-	var subscription azureaccount.Subscription
-	err = p.wait(ctx, "Checking the Azure login", func(ctx context.Context) error {
-		var err error
-		subscription, err = deps.Azure.Subscription(ctx)
-		return err
-	})
-	if err != nil {
-		return err
-	}
-	shared, err := newAzureShared(dirs, cfg, subscription, cmp.Or(cfg.Azure.BaseDomain, defaultAzureBaseDomain), cfg.Azure.Location)
-	if err != nil {
-		return err
-	}
-	if !cmd.Bool("yes") {
-		if !deps.Interactive {
-			return errors.New("destroying the shared Azure resources requires confirmation, pass --yes")
-		}
-		if err := confirmDestroy(ctx, []string{
-			"service principals " + shared.ServicePrincipal + " and " + shared.ExternalDNSServicePrincipal,
-			"NS record " + shared.delegationRecord() + " in " + shared.BaseDomain,
-			"resource group " + shared.ResourceGroup + " with the OIDC issuer and DNS zone " + shared.DNSZone,
-		}); err != nil {
+		tracked, err := trackedPlatform(clusters, st)
+		if err != nil {
 			return err
 		}
+		if tracked == platformName {
+			return fmt.Errorf("management cluster %s exists, destroy it first", st.MgmtCluster)
+		}
 	}
-	p.step("Shared Azure resources in subscription %s", subscription.Name)
-	return destroyAzureShared(ctx, p, deps.Azure, dirs, shared)
+	p := progress{w: cmd.Root().Writer, interactive: deps.Interactive}
+	return platform.destroyShared(ctx, p, cmd.Bool("yes"))
+}
+
+// sharedPlatform returns the platform from the flag or asks for it when
+// interactive.
+func sharedPlatform(ctx context.Context, cmd *cli.Command, deps Deps) (string, error) {
+	if cmd.IsSet("platform") {
+		return cmd.String("platform"), nil
+	}
+	if !deps.Interactive {
+		return "", errors.New("destroying shared resources requires --platform")
+	}
+	return promptPlatform(ctx, platformAWS)
 }
 
 // trackedPlatform returns the platform of the tracked management cluster.

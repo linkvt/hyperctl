@@ -603,7 +603,7 @@ func TestDestroySharedAzureResources(t *testing.T) {
 	env.createAzureClusters(t)
 	env.run(t, "destroy", "--yes")
 
-	env.run(t, "destroy", "shared", "--yes")
+	env.run(t, "destroy", "shared", "--platform", "azure", "--yes")
 
 	if want := []string{"app-tester-hyperctl", "app-tester-hyperctl-external-dns"}; !slices.Equal(env.azure.deletedApplications, want) {
 		t.Errorf("deleted applications: got %v, want %v", env.azure.deletedApplications, want)
@@ -626,7 +626,7 @@ func TestDestroySharedRequiresDestroyedClusters(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)
 
-	_, err := env.runErr(t, "destroy", "shared", "--yes")
+	_, err := env.runErr(t, "destroy", "shared", "--platform", "azure", "--yes")
 
 	if err == nil || !strings.Contains(err.Error(), "destroy it first") {
 		t.Errorf("expected an error about the management cluster, got %v", err)

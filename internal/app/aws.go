@@ -292,3 +292,10 @@ func (a awsPlatform) destroyHosted(ctx context.Context, p progress, hs Hypershif
 func (a awsPlatform) destroyMgmt(ctx context.Context, p progress, yes bool, name string) error {
 	return destroyMgmtCluster(ctx, p, yes, a.deps, a.dirs, a.clusters, name)
 }
+
+// destroyShared keeps the OIDC bucket, it is not deleted yet, and the EC2
+// Spot service-linked role, which other users of the account share.
+func (a awsPlatform) destroyShared(_ context.Context, p progress, _ bool) error {
+	p.done("No shared AWS resources to destroy, the OIDC bucket and the EC2 Spot service-linked role are kept")
+	return nil
+}

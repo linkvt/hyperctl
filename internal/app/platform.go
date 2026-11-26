@@ -28,6 +28,9 @@ type platform interface {
 	// management cluster.
 	destroyHosted(ctx context.Context, p progress, hs Hypershift, yes bool, mgmt, hosted string) error
 	destroyMgmt(ctx context.Context, p progress, yes bool, name string) error
+	// destroyShared destroys the resources that the clusters share. If there
+	// is anything to destroy, it asks for confirmation unless yes is set.
+	destroyShared(ctx context.Context, p progress, yes bool) error
 }
 
 // platformCreate is one create run on a platform. It holds the options of
