@@ -68,7 +68,7 @@ func (a awsPlatform) newCreate(cmd *cli.Command, st state, cfg config) (platform
 		cfg:         cfg,
 		yes:         cmd.Bool("yes"),
 		oidcBucket:  cfg.OIDCBucket,
-		size:        openshiftSize{InstanceType: cmp.Or(cfg.MgmtInstanceType, defaultInstanceType), Workers: compactWorkerCount},
+		size:        openshiftSize{InstanceType: cmp.Or(cfg.MgmtInstanceType, defaultSize.InstanceType), Workers: defaultSize.Workers},
 	}
 	if user := os.Getenv("USER"); user != "" {
 		run.oidcBucket = cmp.Or(run.oidcBucket, user+"-hypershift-oidc")

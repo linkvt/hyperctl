@@ -62,7 +62,7 @@ Re-running `create` skips an installed management cluster.
 If hosted-cluster creation fails, clean up only that cluster with `hyperctl destroy hosted` before retrying; the management cluster remains installed.
 
 1. Check the AWS account: IAM user credentials, EC2 Spot service-linked role, OIDC bucket (created and made public-readable if missing), DNS leftovers
-2. Install the management cluster with `openshift-install` (about 45 minutes), by default as 3 control-plane and 1 worker `t3a.xlarge` nodes in one zone
+2. Install the management cluster with `openshift-install` (about 45 minutes), by default as 3 control-plane and 3 worker `m6i.xlarge` nodes across the zones of the region, the size openshift-install uses by default; the size prompt also offers compact clusters with 1 worker in one zone
 3. Install the HyperShift operator, by default with the standalone karpenter-operator (`--enable-standalone-karpenter-operator`).
    Use `--standalone-karpenter-operator=false` for the one embedded in the HyperShift operator image.
    The `hyperctl image karpenter-operator` override only applies to the standalone one.
@@ -70,7 +70,7 @@ If hosted-cluster creation fails, clean up only that cluster with `hyperctl dest
 4. Unless management-only mode is selected, create the AutoNode hosted cluster and write its kubeconfig
 
 `hyperctl create --help` lists all flags and defaults.
-Set `--workers=0` to install a three-node compact management cluster without a worker.
+Set `--workers=1` or `--workers=0` to install a compact management cluster in one zone, with one or without a worker.
 
 | Command | Purpose |
 |---|---|

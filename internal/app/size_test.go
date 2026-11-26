@@ -14,8 +14,8 @@ func TestCreateManagementClusterSize(t *testing.T) {
 		config string
 		want   mgmtSize
 	}{
-		"compact t3a with one worker in the first zone by default": {
-			want: mgmtSize{instanceType: "t3a.xlarge", workers: 1, zones: []string{"eu-central-1b"}},
+		"three m6i workers in all zones by default": {
+			want: mgmtSize{instanceType: "m6i.xlarge", workers: 3},
 		},
 		"one worker in a single zone": {
 			args: []string{"--instance-type", "t3a.xlarge", "--workers", "1"},
@@ -26,8 +26,8 @@ func TestCreateManagementClusterSize(t *testing.T) {
 			want: mgmtSize{instanceType: "m6i.xlarge", workers: 3},
 		},
 		"from the config file": {
-			config: "mgmtInstanceType: m6i.xlarge\nmgmtWorkers: 3\n",
-			want:   mgmtSize{instanceType: "m6i.xlarge", workers: 3},
+			config: "mgmtInstanceType: t3a.xlarge\nmgmtWorkers: 1\n",
+			want:   mgmtSize{instanceType: "t3a.xlarge", workers: 1, zones: []string{"eu-central-1b"}},
 		},
 	}
 	for name, tc := range tests {

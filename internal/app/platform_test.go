@@ -36,7 +36,7 @@ func TestAWSCreateOptions(t *testing.T) {
 	}{
 		"built-in defaults": {
 			user: "tester",
-			want: awsOptionsView{region: "us-east-2", baseDomain: defaultBaseDomain, oidcBucket: "tester-hypershift-oidc", size: openshiftSize{"t3a.xlarge", 1}},
+			want: awsOptionsView{region: "us-east-2", baseDomain: defaultBaseDomain, oidcBucket: "tester-hypershift-oidc", size: openshiftSize{"m6i.xlarge", 3}},
 		},
 		"from the config file": {
 			user: "tester",
@@ -46,7 +46,7 @@ func TestAWSCreateOptions(t *testing.T) {
 		"last used region": {
 			user: "tester",
 			st:   state{LastRegions: lastRegions{AWS: "eu-north-1", Azure: "eastus"}},
-			want: awsOptionsView{region: "eu-north-1", baseDomain: defaultBaseDomain, oidcBucket: "tester-hypershift-oidc", size: openshiftSize{"t3a.xlarge", 1}},
+			want: awsOptionsView{region: "eu-north-1", baseDomain: defaultBaseDomain, oidcBucket: "tester-hypershift-oidc", size: openshiftSize{"m6i.xlarge", 3}},
 		},
 		"flags override the config file": {
 			args: []string{"--oidc-bucket", "flag-oidc", "--instance-type", "m6i.large", "--workers", "0"},
@@ -55,7 +55,7 @@ func TestAWSCreateOptions(t *testing.T) {
 			want: awsOptionsView{region: "us-east-2", baseDomain: defaultBaseDomain, oidcBucket: "flag-oidc", size: openshiftSize{"m6i.large", 0}},
 		},
 		"no OIDC bucket without USER": {
-			want:        awsOptionsView{region: "us-east-2", baseDomain: defaultBaseDomain, size: openshiftSize{"t3a.xlarge", 1}},
+			want:        awsOptionsView{region: "us-east-2", baseDomain: defaultBaseDomain, size: openshiftSize{"m6i.xlarge", 3}},
 			wantMissing: []string{"--oidc-bucket"},
 		},
 	}

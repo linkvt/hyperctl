@@ -17,9 +17,6 @@ import (
 // compactWorkerCount gives hosted control planes a worker node for management-cluster workloads.
 const compactWorkerCount = 1
 
-// defaultInstanceType sizes a compact management cluster.
-const defaultInstanceType = "t3a.xlarge"
-
 // openshiftSize is the size of an OpenShift management cluster on AWS.
 type openshiftSize struct {
 	// InstanceType is the EC2 instance type of all nodes.
@@ -29,6 +26,9 @@ type openshiftSize struct {
 	Workers int
 }
 
+// defaultSize is the size openshift-install uses by default on AWS.
+var defaultSize = openshiftSize{InstanceType: "m6i.xlarge", Workers: 3}
+
 // sizePreset is a management cluster size offered in the prompt.
 type sizePreset struct {
 	label string
@@ -36,9 +36,9 @@ type sizePreset struct {
 }
 
 var sizePresets = []sizePreset{
-	{"Compact: 3 control plane + 1 worker t3a.xlarge in 1 zone", openshiftSize{defaultInstanceType, compactWorkerCount}},
+	{"Standard: 3 control plane + 3 worker nodes m6i.xlarge in 3 zones", defaultSize},
+	{"Compact: 3 control plane + 1 worker t3a.xlarge in 1 zone", openshiftSize{"t3a.xlarge", compactWorkerCount}},
 	{"Compact: 3 control plane + 1 worker m6i.xlarge in 1 zone", openshiftSize{"m6i.xlarge", compactWorkerCount}},
-	{"Standard: 3 control plane + 3 worker nodes m6i.xlarge in 3 zones", openshiftSize{"m6i.xlarge", 3}},
 }
 
 // customSize marks the custom instance type option of the size prompt.
