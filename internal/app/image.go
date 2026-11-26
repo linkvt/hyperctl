@@ -106,7 +106,7 @@ func runImage(ctx context.Context, cmd *cli.Command, component imageComponent) e
 		}
 		p.done("Set the %s image to %s, the deployment rolls out", component.title, image)
 	default:
-		return restartPods(ctx, p, kubeconfig, st.HostedCluster, component, image)
+		return restartPods(ctx, p, kubeconfig, st.HostedCluster, component)
 	}
 	return nil
 }
@@ -119,17 +119,15 @@ func (c imageComponent) namespace(hosted string) string {
 	return "clusters"
 }
 
-// restartPods deletes the component's pods, so that they pull the unchanged
-// image again. Only :latest images are always pulled by hypershift, other
-// tags use the image cached on the node.
-func restartPods(ctx context.Context, p progress, kubeconfig, hosted string, component imageComponent, image string) error {
+// restartPods deletes the component's pods, so that they start with the
+// unchanged image again. Nodes may serve it from their image cache, only a
+// unique tag reliably rolls out a rebuilt image.
+func restartPods(ctx context.Context, p progress, kubeconfig, hosted string, component imageComponent) error {
 	if err := oc.DeletePods(ctx, kubeconfig, controlPlaneNamespace(hosted), component.selector); err != nil {
 		return err
 	}
 	p.done("The %s image is unchanged, restarted its pods", component.title)
-	if !strings.HasSuffix(image, ":latest") {
-		p.warn("The pods use imagePullPolicy IfNotPresent for tags other than :latest and may keep a cached image, push a new tag or use :latest")
-	}
+	p.warn("The pods may keep a cached image, push the image with a unique tag")
 	return nil
 }
 

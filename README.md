@@ -87,7 +87,7 @@ Interactively, `create` lets you browse the [release controller](https://amd64.o
 
 `image karpenter-operator` sets the `hypershift.openshift.io/karpenter-operator-image` annotation of the hosted cluster, `image karpenter-provider` sets the `autoscaling.openshift.io/karpenter-image` annotation of its HostedControlPlane, which the standalone karpenter-operator reads on both clouds. Either rolls out the deployment.
 Both have no effect with `--standalone-karpenter-operator=false`.
-Setting an unchanged image restarts the pods instead; hypershift only pulls `:latest` images again, other tags may be served from the node's image cache.
+Setting an unchanged image restarts the pods instead, which may keep a cached image; push images with unique tags.
 
 Instances of stopped clusters get pruned, which leaves broken clusters and Route53 records behind.
 `status` detects an unreachable management cluster, `create` and `destroy` list DNS leftovers of previous clusters with the same names and delete them after confirmation (or with `--yes`).

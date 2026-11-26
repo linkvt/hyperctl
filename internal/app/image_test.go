@@ -85,26 +85,35 @@ func TestImageSetsProviderOverride(t *testing.T) {
 
 func TestImageRestartsPodsForUnchangedImage(t *testing.T) {
 	tests := map[string]struct {
-		image       string
-		wantWarning bool
+		component string
+		image     string
+		want      string
 	}{
-		"latest tag": {image: "quay.io/test/karpenter-operator:latest"},
-		"other tag":  {image: "quay.io/test/karpenter-operator:dev", wantWarning: true},
+		"karpenter operator": {
+			component: "karpenter-operator",
+			image:     "quay.io/test/karpenter-operator:latest",
+			want:      "delete pod -n clusters-test-mgmt-workload -l app=karpenter-operator",
+		},
+		"karpenter provider": {
+			component: "karpenter-provider",
+			image:     "quay.io/test/karpenter-aws:dev",
+			want:      "delete pod -n clusters-test-mgmt-workload -l app=karpenter",
+		},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			env := newTestEnv(t)
 			env.createClusters(t)
-			env.run(t, "image", "karpenter-operator", tc.image)
+			env.run(t, "image", tc.component, tc.image)
 
-			out := env.run(t, "image", "karpenter-operator", tc.image)
+			out := env.run(t, "image", tc.component, tc.image)
 
 			calls := env.ocCalls(t, "delete pod")
-			if want := "delete pod -n clusters-test-mgmt-workload -l app=karpenter-operator"; len(calls) != 1 || !strings.Contains(calls[0], want) {
-				t.Errorf("expected pod deletion %q, got %v", want, calls)
+			if len(calls) != 1 || !strings.HasSuffix(calls[0], tc.want) {
+				t.Errorf("expected pod deletion %q, got %v", tc.want, calls)
 			}
-			if gotWarning := strings.Contains(out, "IfNotPresent"); gotWarning != tc.wantWarning {
-				t.Errorf("expected warning %v, got output:\n%s", tc.wantWarning, out)
+			if want := "unique tag"; !strings.Contains(out, want) {
+				t.Errorf("expected %q in output:\n%s", want, out)
 			}
 		})
 	}
