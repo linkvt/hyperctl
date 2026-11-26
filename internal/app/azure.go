@@ -106,6 +106,12 @@ type azureCreate struct {
 }
 
 func (a azurePlatform) newCreate(cmd *cli.Command, st state, cfg config) (platformCreate, error) {
+	if cmd.IsSet("oidc-bucket") {
+		return nil, errors.New("--oidc-bucket does not apply to azure, it uses the OIDC issuer of the shared Azure resources")
+	}
+	if !cmd.Bool("standalone-karpenter-operator") {
+		return nil, errors.New("AutoNode on Azure requires the standalone karpenter-operator, remove --standalone-karpenter-operator=false")
+	}
 	run := &azureCreate{
 		azurePlatform: a,
 		st:            st,
@@ -172,9 +178,6 @@ func (r *azureCreate) checkAccount(ctx context.Context, p progress) error {
 // prepare checks that the location offers the VM size of the AKS nodes and
 // creates the shared Azure resources that are missing.
 func (r *azureCreate) prepare(ctx context.Context, p progress, opts createOptions) error {
-	if !opts.StandaloneKarpenterOperator {
-		return errors.New("AutoNode on Azure requires the standalone karpenter-operator, remove --standalone-karpenter-operator=false")
-	}
 	p.step("Checking the Azure subscription")
 	var zones []string
 	err := p.wait(ctx, "Checking "+r.size.VMSize+" in "+opts.Region, func(ctx context.Context) error {

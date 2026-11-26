@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/urfave/cli/v3"
@@ -80,10 +81,11 @@ func TestAWSCreateOptions(t *testing.T) {
 
 func TestAzureCreateOptions(t *testing.T) {
 	tests := map[string]struct {
-		args []string
-		st   state
-		cfg  config
-		want azureOptionsView
+		args    []string
+		st      state
+		cfg     config
+		want    azureOptionsView
+		wantErr string
 	}{
 		"built-in defaults": {
 			want: azureOptionsView{region: "westus3", baseDomain: defaultAzureBaseDomain, size: aksSize{"Standard_D4s_v5", 3}},
@@ -101,10 +103,24 @@ func TestAzureCreateOptions(t *testing.T) {
 			cfg:  config{Azure: azureConfig{MgmtVMSize: "Standard_D8s_v5", MgmtNodes: 2}},
 			want: azureOptionsView{region: "westus3", baseDomain: defaultAzureBaseDomain, size: aksSize{"Standard_D2s_v5", 5}},
 		},
+		"rejects the OIDC bucket": {
+			args:    []string{"--oidc-bucket", "my-oidc"},
+			wantErr: "--oidc-bucket does not apply to azure",
+		},
+		"rejects the embedded karpenter-operator": {
+			args:    []string{"--standalone-karpenter-operator=false"},
+			wantErr: "requires the standalone karpenter-operator",
+		},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			run, err := azurePlatform{}.newCreate(parseCreateFlags(t, tc.args...), tc.st, tc.cfg)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("expected an error containing %q, got %v", tc.wantErr, err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -47,12 +47,12 @@ func createCommand(deps Deps) *cli.Command {
 			&cli.StringFlag{Name: "ssh-key", Usage: "Path to an SSH public key for node access (optional)"},
 			&cli.BoolFlag{Name: "yes", Usage: "Do not ask for confirmation, also not for deleting DNS leftovers of previous clusters"},
 			&cli.BoolFlag{Name: "management-only", Usage: "Create the management cluster and install the HyperShift operator without creating a hosted cluster"},
-			&cli.BoolFlag{Name: "standalone-karpenter-operator", Value: true, Usage: "Run the standalone karpenter-operator in hosted clusters, =false runs the one embedded in the HyperShift operator image"},
+			&cli.BoolFlag{Name: "standalone-karpenter-operator", Value: true, Usage: "Run the standalone karpenter-operator in hosted clusters, =false (AWS only) runs the one embedded in the HyperShift operator image"},
 			&cli.StringFlag{Name: "hosted-name", Usage: "Hosted cluster name (default: <name>-workload)"},
 			&cli.StringFlag{Name: "instance-type", Usage: "EC2 instance type or Azure VM size of the management cluster nodes (default: " + defaultInstanceType + ", on Azure " + defaultAzureVMSize + ")"},
 			&cli.IntFlag{Name: "workers", Usage: "Worker nodes of the management cluster, on Azure the number of AKS nodes (default: 1, on Azure 3; 0 disables workers on AWS)"},
 			&cli.StringFlag{Name: "hypershift", Usage: "Path to the hypershift binary (default: from PATH)"},
-			&cli.StringFlag{Name: "oidc-bucket", Usage: "S3 bucket for OIDC discovery documents, created if missing (default: $USER-hypershift-oidc)"},
+			&cli.StringFlag{Name: "oidc-bucket", Usage: "S3 bucket for OIDC discovery documents on AWS, created if missing (default: $USER-hypershift-oidc)"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return runCreate(ctx, cmd, deps)

@@ -339,14 +339,31 @@ func TestCreateAzureUsesSharedResourcesFromConfig(t *testing.T) {
 	}
 }
 
+// TestCreateAzureRequiresStandaloneKarpenterOperator expects the flag to be
+// rejected before the Azure login is checked.
 func TestCreateAzureRequiresStandaloneKarpenterOperator(t *testing.T) {
 	env := newTestEnv(t)
+	env.azure.subscriptionErr = errors.New("not logged in")
 
 	_, err := env.runErr(t, "create", "--platform", "azure", "--standalone-karpenter-operator=false",
 		"--release", "5.1.0-ec.0", "--region", testAzureLocation, "--pull-secret", env.pullSecret)
 
 	if err == nil || !strings.Contains(err.Error(), "standalone karpenter-operator") {
 		t.Errorf("expected a standalone karpenter-operator error, got %v", err)
+	}
+}
+
+// TestCreateAzureRejectsOIDCBucket expects the AWS-only flag to be rejected
+// before the Azure login is checked.
+func TestCreateAzureRejectsOIDCBucket(t *testing.T) {
+	env := newTestEnv(t)
+	env.azure.subscriptionErr = errors.New("not logged in")
+
+	_, err := env.runErr(t, "create", "--platform", "azure", "--oidc-bucket", "my-oidc",
+		"--release", "5.1.0-ec.0", "--region", testAzureLocation, "--pull-secret", env.pullSecret)
+
+	if err == nil || !strings.Contains(err.Error(), "--oidc-bucket does not apply to azure") {
+		t.Errorf("expected the flag to be rejected, got %v", err)
 	}
 }
 

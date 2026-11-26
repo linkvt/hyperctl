@@ -21,7 +21,8 @@ const (
 // clusters (azure.go).
 type platform interface {
 	// newCreate starts a create run, reading the options of the platform from
-	// the flags and the config file.
+	// the flags and the config file. It fails for set flags that don't apply
+	// to the platform, before any prompt or cloud operation.
 	newCreate(cmd *cli.Command, st state, cfg config) (platformCreate, error)
 	// destroyHosted destroys a hosted cluster with hs, which runs against its
 	// management cluster.
