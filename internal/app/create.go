@@ -39,7 +39,7 @@ func createCommand(deps Deps) *cli.Command {
 		Usage: "Create the management cluster",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "release", Usage: "OCP release version, e.g. 5.1.0-ec.0, or release image pull spec (default: last used)"},
-			&cli.StringFlag{Name: "platform", Usage: "Cloud platform of the clusters, aws or azure (default: last used, or aws)"},
+			&cli.StringFlag{Name: "platform", Usage: "Cloud platform of the clusters, aws or azure (default: the platform of the management cluster, otherwise asked for, or aws)"},
 			&cli.StringFlag{Name: "region", Usage: "AWS region or Azure location, e.g. westus3 or germanywestcentral (default: last used, AWS profile region or " + defaultAzureLocation + ")"},
 			&cli.StringFlag{Name: "base-domain", Usage: "Base domain with a public DNS zone (default: " + defaultBaseDomain + ", on Azure " + defaultAzureBaseDomain + ")"},
 			&cli.StringFlag{Name: "name", Usage: "Management cluster name (default: $USER-karpenter)"},
