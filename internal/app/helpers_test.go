@@ -3,7 +3,6 @@ package app_test
 import (
 	"bytes"
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -49,6 +48,8 @@ type testEnv struct {
 	// interactive runs hyperctl as in a terminal. Prompts fail in tests, as
 	// they find no terminal.
 	interactive bool
+	// stderr is the error output of the last run.
+	stderr string
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -90,7 +91,7 @@ func (e *testEnv) run(t *testing.T, args ...string) string {
 
 func (e *testEnv) runErr(t *testing.T, args ...string) (string, error) {
 	t.Helper()
-	var out bytes.Buffer
+	var out, stderr bytes.Buffer
 	cmd := app.New(app.Deps{
 		AWS:           e.aws,
 		Azure:         e.azure,
@@ -102,9 +103,10 @@ func (e *testEnv) runErr(t *testing.T, args ...string) (string, error) {
 		ReleasesURL:   e.releasesURL,
 		Interactive:   e.interactive,
 		Stdout:        &out,
-		Stderr:        io.Discard,
+		Stderr:        &stderr,
 	})
 	err := cmd.Run(context.Background(), append([]string{"hyperctl"}, args...))
+	e.stderr = stderr.String()
 	return out.String(), err
 }
 
@@ -117,6 +119,8 @@ type fakeAWS struct {
 	bucketsCreated int
 	// dns maps cluster names to their DNS entries.
 	dns map[string][]string
+	// beforeClusterDNS runs before the DNS entries of a cluster are looked up.
+	beforeClusterDNS func()
 }
 
 func (f *fakeAWS) CallerIdentity(context.Context) (string, error) {
@@ -153,6 +157,9 @@ func writeFile(t *testing.T, path, content string, perm os.FileMode) {
 }
 
 func (f *fakeAWS) ClusterDNS(_ context.Context, _, name string) ([]string, error) {
+	if f.beforeClusterDNS != nil {
+		f.beforeClusterDNS()
+	}
 	return f.dns[name], nil
 }
 

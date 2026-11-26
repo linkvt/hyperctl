@@ -39,20 +39,23 @@ func createCommand(deps Deps) *cli.Command {
 		Usage: "Create a cluster, optionally with the HyperShift operator and an AutoNode hosted cluster",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "release", Usage: "OCP release version, e.g. 5.1.0-ec.0, or release image pull spec (default: last used)"},
-			&cli.StringFlag{Name: "platform", Usage: "Cloud platform of the clusters, aws or azure (default: the platform of the management cluster, otherwise asked for, or aws)"},
+			&cli.StringFlag{Name: "platform", Usage: "Cloud platform of the clusters, aws or azure (default: the platform of an existing cluster --name, otherwise asked for, or aws)"},
 			&cli.StringFlag{Name: "region", Usage: "AWS region or Azure location, e.g. westus3 or germanywestcentral (default: last used, AWS profile region or " + defaultAzureLocation + ")"},
 			&cli.StringFlag{Name: "base-domain", Usage: "Base domain with a public DNS zone (default: " + defaultBaseDomain + ", on Azure " + defaultAzureBaseDomain + ")"},
-			&cli.StringFlag{Name: "name", Usage: "Management cluster name (default: $USER-karpenter)"},
+			&cli.StringFlag{Name: "name", Usage: "Name of the standalone or management cluster, new or existing (default: the current cluster or its management cluster, else $USER-karpenter)"},
 			&cli.StringFlag{Name: "pull-secret", Usage: "Path to the pull secret file (default: ~/.openshift/pull-secret-latest.json)"},
 			&cli.StringFlag{Name: "ssh-key", Usage: "Path to an SSH public key for node access (optional)"},
 			&cli.BoolFlag{Name: "yes", Usage: "Do not ask anything: use the defaults for values not given as flags, skip the confirmation and delete DNS leftovers of previous clusters"},
 			&cli.StringFlag{Name: "setup", Usage: "What to create: standalone (a cluster without HyperShift), management (a management cluster with the HyperShift operator) or hosted (a management cluster with an AutoNode hosted cluster) (default: last used, or hosted)"},
 			&cli.BoolFlag{Name: "standalone-karpenter-operator", Value: true, Usage: "Run the standalone karpenter-operator in hosted clusters, =false (AWS only) runs the one embedded in the HyperShift operator image"},
-			&cli.StringFlag{Name: "hosted-name", Usage: "Hosted cluster name (default: <name>-workload)"},
+			&cli.StringFlag{Name: "hosted-name", Usage: "Name of the hosted cluster, new or existing (default: the current hosted cluster of --name, else its only hosted cluster, else <name>-workload)"},
 			&cli.StringFlag{Name: "instance-type", Usage: "EC2 instance type or Azure VM size of the management cluster nodes (default: " + defaultSize.InstanceType + ", on Azure " + defaultAzureVMSize + ")"},
 			&cli.IntFlag{Name: "workers", Usage: "Worker nodes of the management cluster, on Azure the number of AKS nodes (default: 3; on AWS 0 or 1 runs a compact cluster in one zone)"},
 			&cli.StringFlag{Name: "hypershift", Usage: "Path to the hypershift binary (default: from PATH)"},
 			&cli.StringFlag{Name: "oidc-bucket", Usage: "S3 bucket for OIDC discovery documents on AWS, created if missing (default: $USER-hypershift-oidc)"},
+			// --cluster selects existing clusters for other commands, it is
+			// rejected with a hint to --name.
+			&cli.StringFlag{Name: "cluster", Hidden: true},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return runCreate(ctx, cmd, deps)
@@ -61,6 +64,9 @@ func createCommand(deps Deps) *cli.Command {
 }
 
 func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
+	if cmd.IsSet("cluster") {
+		return errCreateCluster
+	}
 	p := progress{w: cmd.Root().Writer, interactive: deps.Interactive}
 	p.step("Checking prerequisites")
 	dirs, err := xdg.Resolve("hyperctl")
@@ -76,7 +82,7 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 		return err
 	}
 	clusters := newClusterStore(dirs)
-	platformName, err := resolvePlatform(ctx, p, cmd, deps, clusters, st)
+	list, err := clusters.list()
 	if err != nil {
 		return err
 	}
@@ -85,6 +91,17 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 		return err
 	}
 	if err := checkSetupFlags(cmd, setup); err != nil {
+		return err
+	}
+	target, err := resolveCreateTarget(ctx, cmd, deps, list, st, setup)
+	if err != nil {
+		return err
+	}
+	if err := target.checkFlags(cmd); err != nil {
+		return err
+	}
+	platformName, err := resolvePlatform(ctx, p, cmd, deps, target)
+	if err != nil {
 		return err
 	}
 	platform, err := newPlatform(platformName, deps, dirs, clusters)
@@ -107,17 +124,16 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 		p.done("hypershift %s", hypershiftPath)
 	}
 
-	opts, err := resolveCreateOptions(ctx, p, cmd, deps, dirs, clusters, st, cfg, platformName, setup, run)
+	opts, err := resolveCreateOptions(ctx, p, cmd, deps, dirs, st, cfg, platformName, target, run)
 	if err != nil {
 		return err
 	}
-	if err := requireTrackedClusters(st, opts); err != nil {
-		return err
-	}
-	st.LastRelease = cmp.Or(opts.Release, st.LastRelease)
-	st.Setup = opts.Setup
-	run.rememberRegion(&st, opts.Region)
-	if err := saveState(dirs.State, st); err != nil {
+	err = updateState(dirs.State, func(st *state) {
+		st.LastRelease = cmp.Or(opts.Release, st.LastRelease)
+		st.Setup = opts.Setup
+		run.rememberRegion(st, opts.Region)
+	})
+	if err != nil {
 		return err
 	}
 
@@ -127,8 +143,7 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 
 	// Track the clusters before creating them, so that incomplete ones can
 	// be destroyed.
-	st.MgmtCluster = opts.Name
-	if err := saveState(dirs.State, st); err != nil {
+	if err := trackCurrent(dirs, clusters, managementCluster(opts.Name)); err != nil {
 		return err
 	}
 	p.step("%s %s", setup.clusterTitle(), opts.Name)
@@ -149,10 +164,6 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	}
 
 	if setup.hosted() {
-		st.HostedCluster = opts.HostedName
-		if err := saveState(dirs.State, st); err != nil {
-			return err
-		}
 		p.step("Hosted cluster %s", opts.HostedName)
 		if err := run.createHosted(ctx, p, hs, opts); err != nil {
 			return err
@@ -164,23 +175,23 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	return nil
 }
 
-// requireTrackedClusters fails if create would replace a tracked cluster, as
-// only one management and one hosted cluster are supported.
-func requireTrackedClusters(st state, opts createOptions) error {
-	if st.MgmtCluster != "" && st.MgmtCluster != opts.Name {
-		return fmt.Errorf("management cluster %s exists, destroy it first", st.MgmtCluster)
+// trackCurrent makes a cluster about to be created the current cluster. Its
+// directory is created first, so that the current cluster exists even if
+// the creation stops before the record is saved.
+func trackCurrent(dirs xdg.Dirs, clusters clusterStore, c clusterRef) error {
+	if err := clusters.track(c); err != nil {
+		return err
 	}
-	if opts.Setup.hosted() && st.HostedCluster != "" && st.HostedCluster != opts.HostedName {
-		return fmt.Errorf("hosted cluster %s exists, destroy it first", st.HostedCluster)
-	}
-	return nil
+	return updateState(dirs.State, func(st *state) {
+		st.Current = c.name()
+	})
 }
 
 // resolveCreateOptions takes values from flags, prompts for missing ones if it
 // may prompt and falls back to defaults otherwise. The SSH key is only asked
 // once and then saved to the config file.
-func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, deps Deps, dirs xdg.Dirs, clusters clusterStore, st state, cfg config, platformName string, setup setup, run platformCreate) (createOptions, error) {
-	defaults, err := defaultCreateOptions(clusters, st, cfg, run)
+func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, deps Deps, dirs xdg.Dirs, st state, cfg config, platformName string, target createTarget, run platformCreate) (createOptions, error) {
+	defaults, err := defaultCreateOptions(target, st, cfg, run)
 	if err != nil {
 		return createOptions{}, err
 	}
@@ -188,17 +199,22 @@ func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, dep
 		Release:    flagOr(cmd, "release", defaults.Release),
 		Region:     flagOr(cmd, "region", defaults.Region),
 		BaseDomain: flagOr(cmd, "base-domain", defaults.BaseDomain),
-		Name:       flagOr(cmd, "name", defaults.Name),
+		Name:       target.name,
 		PullSecret: flagOr(cmd, "pull-secret", defaults.PullSecret),
 		SSHKey:     flagOr(cmd, "ssh-key", defaults.SSHKey),
-		HostedName: flagOr(cmd, "hosted-name", defaults.HostedName),
-		Setup:      setup,
+		HostedName: target.hostedName,
+		Setup:      target.setup,
 
 		StandaloneKarpenterOperator: cmd.Bool("standalone-karpenter-operator"),
 	}
+	// The release applies only to the clusters the run creates.
+	needsRelease := run.needsRelease() && target.creates()
+	if !target.creates() {
+		opts.Release = ""
+	}
 	if prompts(cmd, deps) {
 		askSSHKey := !cmd.IsSet("ssh-key") && cfg.SSHKey == nil
-		if err := promptCreateOptions(ctx, p, cmd, releases.Client{BaseURL: deps.ReleasesURL}, run, &opts, askSSHKey); err != nil {
+		if err := promptCreateOptions(ctx, p, cmd, releases.Client{BaseURL: deps.ReleasesURL}, run, target, &opts, askSSHKey); err != nil {
 			return createOptions{}, err
 		}
 		if err := confirmCreateOptions(ctx, platformName, run, opts); err != nil {
@@ -215,9 +231,6 @@ func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, dep
 		// The cluster does not use these values, so they are not recorded.
 		opts.Release, opts.BaseDomain, opts.PullSecret = "", "", ""
 	}
-	if opts.Setup.hosted() && opts.HostedName == "" && opts.Name != "" {
-		opts.HostedName = opts.Name + "-workload"
-	}
 	// Paths from the config file or prompts are not expanded by a shell.
 	if opts.PullSecret, err = expandHome(opts.PullSecret); err != nil {
 		return createOptions{}, err
@@ -231,13 +244,15 @@ func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, dep
 		// release marks the values only needed with needsRelease.
 		release bool
 	}{
-		{"--release", opts.Release, true},
 		{"--region", opts.Region, false},
 		{"--base-domain", opts.BaseDomain, true},
 		{"--name", opts.Name, false},
 		{"--pull-secret", opts.PullSecret, true},
 	}
 	var missing []string
+	if needsRelease && opts.Release == "" {
+		missing = append(missing, "--release")
+	}
 	for _, r := range required {
 		if r.value == "" && (!r.release || run.needsRelease()) {
 			missing = append(missing, r.flag)
@@ -247,7 +262,7 @@ func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, dep
 	if len(missing) > 0 {
 		return createOptions{}, fmt.Errorf("missing required values: %s", strings.Join(missing, ", "))
 	}
-	if !run.needsRelease() {
+	if !needsRelease {
 		return opts, nil
 	}
 	if err := checkReleasePullable(ctx, p, deps.ReleaseImages, opts); err != nil {
@@ -301,8 +316,9 @@ func loginHint(registry, pullSecret string) string {
 }
 
 // defaultCreateOptions returns the built-in defaults, overridden by the
-// config file, the last used release and the tracked clusters.
-func defaultCreateOptions(clusters clusterStore, st state, cfg config, run platformCreate) (createOptions, error) {
+// config file, the last used release and the record of an existing
+// standalone or management cluster.
+func defaultCreateOptions(target createTarget, st state, cfg config, run platformCreate) (createOptions, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return createOptions{}, err
@@ -313,25 +329,14 @@ func defaultCreateOptions(clusters clusterStore, st state, cfg config, run platf
 		BaseDomain: run.defaultBaseDomain(),
 		PullSecret: cmp.Or(cfg.PullSecret, filepath.Join(home, ".openshift", "pull-secret-latest.json")),
 	}
-	if user := os.Getenv("USER"); user != "" {
-		opts.Name = user + "-karpenter"
-	}
 	if cfg.SSHKey != nil {
 		opts.SSHKey = *cfg.SSHKey
 	}
-	if st.MgmtCluster == "" {
-		return opts, nil
-	}
 
-	// A tracked management cluster determines the settings of its hosted
-	// cluster. A cluster without the HyperShift operator may not have
+	// An existing management cluster determines the settings of its hosted
+	// clusters. A cluster without the HyperShift operator may not have
 	// recorded all of them.
-	opts.Name = st.MgmtCluster
-	opts.HostedName = st.HostedCluster
-	record, found, err := clusters.load(managementCluster(st.MgmtCluster))
-	if err != nil || !found {
-		return opts, err
-	}
+	record := target.mgmt.record
 	opts.Release = cmp.Or(record.Release, opts.Release)
 	opts.Region = cmp.Or(record.Region, opts.Region)
 	opts.BaseDomain = cmp.Or(record.BaseDomain, opts.BaseDomain)

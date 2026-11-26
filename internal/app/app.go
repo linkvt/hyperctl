@@ -90,8 +90,10 @@ func New(deps Deps) *cli.Command {
 			destroyCommand(deps),
 			imageCommand(deps),
 			kubeconfigCommand(deps),
+			listCommand(),
 			releasesCommand(deps),
 			statusCommand(deps),
+			useCommand(),
 		},
 	}
 }

@@ -18,8 +18,8 @@ import (
 
 // promptCreateOptions asks for every value not given as a flag, prefilled
 // with the current value, and for the SSH key if askSSHKey is set.
-func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, client releases.Client, run platformCreate, opts *createOptions, askSSHKey bool) error {
-	if run.needsRelease() && !cmd.IsSet("release") {
+func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, client releases.Client, run platformCreate, target createTarget, opts *createOptions, askSSHKey bool) error {
+	if run.needsRelease() && target.creates() && !cmd.IsSet("release") {
 		release, err := promptRelease(ctx, p, client, opts.Release)
 		if err != nil {
 			return err
@@ -28,6 +28,7 @@ func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, clie
 	}
 
 	regionTitle, regionDescription := run.regionPrompt()
+	record := target.mgmt.record
 	var fields []huh.Field
 	for _, input := range []struct {
 		flag        string
@@ -36,13 +37,14 @@ func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, clie
 		value       *string
 		// release marks the values only asked with needsRelease.
 		release bool
+		// recorded is the value of an existing cluster, which is not asked.
+		recorded string
 	}{
-		{"region", regionTitle, regionDescription, &opts.Region, false},
-		{"base-domain", "Base domain", "", &opts.BaseDomain, true},
-		{"name", opts.Setup.clusterTitle() + " name", "", &opts.Name, false},
-		{"pull-secret", "Pull secret file", "", &opts.PullSecret, true},
+		{"region", regionTitle, regionDescription, &opts.Region, false, record.Region},
+		{"base-domain", "Base domain", "", &opts.BaseDomain, true, record.BaseDomain},
+		{"pull-secret", "Pull secret file", "", &opts.PullSecret, true, record.PullSecret},
 	} {
-		if cmd.IsSet(input.flag) || (input.release && !run.needsRelease()) {
+		if cmd.IsSet(input.flag) || (input.release && !run.needsRelease()) || input.recorded != "" {
 			continue
 		}
 		field := huh.NewInput().Title(input.title).Value(input.value).Validate(requireValue)
@@ -50,12 +52,6 @@ func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, clie
 			field = field.Description(input.description)
 		}
 		fields = append(fields, field)
-	}
-	if opts.Setup.hosted() && !cmd.IsSet("hosted-name") {
-		fields = append(fields, huh.NewInput().
-			Title("Hosted cluster name").
-			Placeholder("<management cluster name>-workload").
-			Value(&opts.HostedName))
 	}
 	if askSSHKey {
 		sshKeys, err := sshPublicKeys()
@@ -248,7 +244,7 @@ func confirmCreateOptions(ctx context.Context, platformName string, run platform
 		"Platform:       " + platformName,
 		"Setup:          " + setup,
 	}
-	if run.needsRelease() {
+	if opts.Release != "" {
 		lines = append(lines, "Release:        "+opts.Release)
 	}
 	lines = append(lines, "Region:         "+opts.Region)
@@ -261,7 +257,7 @@ func confirmCreateOptions(ctx context.Context, platformName string, run platform
 	}
 	lines = append(lines, clusterLabel+opts.Name, sizeLabel+run.describeSize())
 	if opts.Setup.hosted() {
-		lines = append(lines, "Hosted cluster: "+cmp.Or(opts.HostedName, opts.Name+"-workload"))
+		lines = append(lines, "Hosted cluster: "+opts.HostedName)
 	}
 	if run.needsRelease() {
 		lines = append(lines, "Pull secret:    "+opts.PullSecret)

@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"github.com/urfave/cli/v3"
-
-	"github.com/linkvt/hyperctl/internal/xdg"
 )
 
 // imageComponent is a hosted control plane component whose image can be
@@ -51,6 +49,7 @@ func imageCommand(deps Deps) *cli.Command {
 			ArgsUsage: "<image>",
 			Flags: []cli.Flag{
 				&cli.BoolFlag{Name: "reset", Usage: "Remove the override and use the image of the release"},
+				clusterFlag(),
 			},
 			Action: func(ctx context.Context, cmd *cli.Command) error {
 				return runImage(ctx, cmd, deps.Cluster, component)
@@ -71,20 +70,18 @@ func runImage(ctx context.Context, cmd *cli.Command, cluster ClusterAPI, compone
 		return errors.New("expected an image or --reset")
 	}
 
-	dirs, err := xdg.Resolve("hyperctl")
+	sel, err := selectCluster(cmd)
 	if err != nil {
 		return err
 	}
-	st, err := loadState(dirs.State)
+	selected, err := sel.hosted()
 	if err != nil {
 		return err
 	}
-	if st.HostedCluster == "" {
-		return errors.New("no hosted cluster, run hyperctl create")
-	}
-	kubeconfig := newClusterStore(dirs).kubeconfig(managementCluster(st.MgmtCluster))
-	namespace := component.namespace(st.HostedCluster)
-	annotations, err := cluster.Annotations(ctx, kubeconfig, component.kind, namespace, st.HostedCluster)
+	hosted := selected.hosted
+	kubeconfig := sel.store.kubeconfig(managementCluster(selected.mgmt))
+	namespace := component.namespace(hosted)
+	annotations, err := cluster.Annotations(ctx, kubeconfig, component.kind, namespace, hosted)
 	if err != nil {
 		return err
 	}
@@ -95,17 +92,17 @@ func runImage(ctx context.Context, cmd *cli.Command, cluster ClusterAPI, compone
 	case reset && !set:
 		p.done("No %s image override set", component.title)
 	case reset:
-		if err := cluster.RemoveAnnotation(ctx, kubeconfig, component.kind, namespace, st.HostedCluster, component.annotation); err != nil {
+		if err := cluster.RemoveAnnotation(ctx, kubeconfig, component.kind, namespace, hosted, component.annotation); err != nil {
 			return err
 		}
 		p.done("Removed the %s image override, the deployment rolls out with the release image", component.title)
 	case current != image:
-		if err := cluster.Annotate(ctx, kubeconfig, component.kind, namespace, st.HostedCluster, component.annotation, image); err != nil {
+		if err := cluster.Annotate(ctx, kubeconfig, component.kind, namespace, hosted, component.annotation, image); err != nil {
 			return err
 		}
 		p.done("Set the %s image to %s, the deployment rolls out", component.title, image)
 	default:
-		return restartPods(ctx, p, cluster, kubeconfig, st.HostedCluster, component)
+		return restartPods(ctx, p, cluster, kubeconfig, hosted, component)
 	}
 	return nil
 }

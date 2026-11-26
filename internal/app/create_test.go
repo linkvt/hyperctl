@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -474,16 +475,8 @@ func TestCreateSetupManagementSkipsHostedCluster(t *testing.T) {
 		t.Errorf("hosted cluster DNS leftovers should remain untouched, got %v", got)
 	}
 
-	var state struct {
-		MgmtCluster   string `json:"mgmtCluster"`
-		HostedCluster string `json:"hostedCluster"`
-	}
-	statePath := filepath.Join(env.home, ".local", "state", "hyperctl", "state.yaml")
-	if err := yaml.Unmarshal([]byte(readFile(t, statePath)), &state); err != nil {
-		t.Fatalf("parsing state: %v", err)
-	}
-	if state.MgmtCluster != "test-mgmt" || state.HostedCluster != "" {
-		t.Errorf("state: got management %q, hosted %q; want management test-mgmt and no hosted cluster", state.MgmtCluster, state.HostedCluster)
+	if got := env.currentCluster(t); got != "test-mgmt" {
+		t.Errorf("current cluster: got %q, want test-mgmt", got)
 	}
 	if !strings.Contains(output, "Done, use the cluster kubeconfig with:\n") || !strings.Contains(output, "export KUBECONFIG=$(hyperctl kubeconfig)") {
 		t.Errorf("setup management completion should use the common kubeconfig command, got:\n%s", output)
@@ -508,7 +501,6 @@ func TestCreateRemembersSetup(t *testing.T) {
 	env.run(t, args...)
 	args = []string{
 		"create",
-		"--release", "5.1.0-ec.0",
 		"--region", "eu-central-1",
 		"--name", "test-mgmt",
 		"--pull-secret", env.pullSecret,
@@ -766,16 +758,9 @@ func TestCreateUsesHypershiftFromConfig(t *testing.T) {
 
 func TestCreateSkipsInstalledCluster(t *testing.T) {
 	env := newTestEnv(t)
+	env.createClusters(t)
 
-	for range 2 {
-		env.run(t, "create",
-			"--release", "5.1.0-ec.0",
-			"--region", "eu-central-1",
-			"--base-domain", "example.com",
-			"--name", "test-mgmt",
-			"--pull-secret", env.pullSecret,
-		)
-	}
+	env.run(t, "create")
 
 	if got := len(env.images.creates); got != 1 {
 		t.Errorf("expected 1 installer call, got %d", got)
@@ -809,15 +794,9 @@ func TestCreateRefusesIncompleteInstallation(t *testing.T) {
 
 func TestCreateSkipsCreatedHostedCluster(t *testing.T) {
 	env := newTestEnv(t)
+	env.createClusters(t)
 
-	for range 2 {
-		env.run(t, "create",
-			"--release", "5.1.0-ec.0",
-			"--region", "eu-central-1",
-			"--name", "test-mgmt",
-			"--pull-secret", env.pullSecret,
-		)
-	}
+	env.run(t, "create", "--name", "test-mgmt")
 
 	if creates := len(env.hypershift.clusters); creates != 1 {
 		t.Errorf("expected 1 hosted cluster creation, got %d", creates)
@@ -847,22 +826,29 @@ func TestCreateRefusesIncompleteHostedCluster(t *testing.T) {
 		t.Errorf("expected 1 hosted cluster creation, got %d", creates)
 	}
 }
-func TestCreateRefusesSecondManagementCluster(t *testing.T) {
+func TestCreateSecondManagementCluster(t *testing.T) {
 	env := newTestEnv(t)
 	env.createClusters(t)
 
-	_, err := env.runErr(t, "create",
+	env.run(t, "create",
 		"--release", "5.1.0-ec.0",
 		"--region", "eu-central-1",
 		"--name", "other-mgmt",
 		"--pull-secret", env.pullSecret,
 	)
 
-	if err == nil || !strings.Contains(err.Error(), "test-mgmt") {
-		t.Errorf("expected error about existing management cluster test-mgmt, got %v", err)
+	var installDirs []string
+	for _, call := range env.images.creates {
+		installDirs = append(installDirs, filepath.Base(filepath.Dir(call.installDir)))
 	}
-	if got := len(env.images.creates); got != 1 {
-		t.Errorf("expected 1 installer call, got %d", got)
+	if want := []string{"test-mgmt", "other-mgmt"}; !slices.Equal(installDirs, want) {
+		t.Errorf("installed clusters: got %v, want %v", installDirs, want)
+	}
+	if got := env.hypershift.clusters[1].params.Name; got != "other-mgmt-workload" {
+		t.Errorf("hosted cluster of other-mgmt: got %s, want other-mgmt-workload", got)
+	}
+	if got := env.currentCluster(t); got != "other-mgmt" {
+		t.Errorf("current cluster: got %q, want other-mgmt", got)
 	}
 }
 

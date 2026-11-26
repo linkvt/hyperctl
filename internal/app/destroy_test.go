@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"sigs.k8s.io/yaml"
+
 	"github.com/linkvt/hyperctl/internal/hypershift"
 	"github.com/linkvt/hyperctl/internal/ocp"
 )
@@ -16,7 +18,7 @@ func TestDestroyHostedDestroysOnlyHostedCluster(t *testing.T) {
 	env := newTestEnv(t)
 	env.createClusters(t)
 
-	env.run(t, "destroy", "hosted", "--yes")
+	env.run(t, "destroy", "--cluster", "test-mgmt-workload", "--yes")
 
 	call := single(t, env.hypershift.destroys)
 	want := hypershift.DestroyClusterParams{
@@ -31,10 +33,10 @@ func TestDestroyHostedDestroysOnlyHostedCluster(t *testing.T) {
 	if want := filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/install/auth/kubeconfig"); call.kubeconfig != want {
 		t.Errorf("hypershift KUBECONFIG: got %q, want %q", call.kubeconfig, want)
 	}
-	if _, err := env.runErr(t, "kubeconfig", "hosted"); err == nil {
+	if _, err := env.runErr(t, "kubeconfig", "--cluster", "test-mgmt-workload"); err == nil {
 		t.Error("expected no hosted cluster after destroy")
 	}
-	env.run(t, "kubeconfig", "mgmt")
+	env.run(t, "kubeconfig", "--cluster", "test-mgmt")
 	if got := env.images.destroys; len(got) != 0 {
 		t.Errorf("expected no management cluster destroy, got %v", got)
 	}
@@ -46,7 +48,7 @@ func TestDestroyHostedDestroysInfraWhenManagementClusterIsUnreachable(t *testing
 	infraID := env.hostedInfraID(t)
 	env.cluster.apiDown = true
 
-	env.run(t, "destroy", "hosted", "--yes")
+	env.run(t, "destroy", "--cluster", "test-mgmt-workload", "--yes")
 
 	if calls := env.hypershift.destroys; len(calls) != 0 {
 		t.Errorf("expected no hypershift destroy cluster, got %+v", calls)
@@ -60,7 +62,7 @@ func TestDestroyHostedDestroysInfraWhenManagementClusterIsUnreachable(t *testing
 	if calls := env.hypershift.infraDestroys; len(calls) != 1 || calls[0].params != want {
 		t.Errorf("hypershift destroy infra:\ngot:  %+v\nwant: %+v", calls, want)
 	}
-	if _, err := env.runErr(t, "kubeconfig", "hosted"); err == nil {
+	if _, err := env.runErr(t, "kubeconfig", "--cluster", "test-mgmt-workload"); err == nil {
 		t.Error("expected no hosted cluster after destroy")
 	}
 }
@@ -68,6 +70,11 @@ func TestDestroyHostedDestroysInfraWhenManagementClusterIsUnreachable(t *testing
 func TestDestroyDestroysHostedAndManagementCluster(t *testing.T) {
 	env := newTestEnv(t)
 	env.createClusters(t)
+	env.images.beforeDestroy = func() {
+		if len(env.hypershift.destroys) != 1 {
+			t.Error("expected the hosted cluster to be destroyed before the management cluster")
+		}
+	}
 
 	env.run(t, "destroy", "--yes")
 
@@ -79,8 +86,47 @@ func TestDestroyDestroysHostedAndManagementCluster(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt")); !os.IsNotExist(err) {
 		t.Errorf("expected cluster data to be removed, stat error: %v", err)
 	}
-	if _, err := env.runErr(t, "kubeconfig", "mgmt"); err == nil {
+	if _, err := env.runErr(t, "kubeconfig", "--cluster", "test-mgmt"); err == nil {
 		t.Error("expected no management cluster after destroy")
+	}
+	if got := env.currentCluster(t); got != "" {
+		t.Errorf("current cluster: got %q, want none", got)
+	}
+}
+
+// TestDestroyCurrentHostedClusterKeepsManagementCluster expects the
+// management cluster to become current.
+func TestDestroyCurrentHostedClusterKeepsManagementCluster(t *testing.T) {
+	env := newTestEnv(t)
+	env.createClusters(t)
+	env.run(t, "use", "test-mgmt-workload")
+
+	env.run(t, "destroy", "--yes")
+
+	single(t, env.hypershift.destroys)
+	if got := env.images.destroys; len(got) != 0 {
+		t.Errorf("expected no management cluster destroy, got %v", got)
+	}
+	if got := env.currentCluster(t); got != "test-mgmt" {
+		t.Errorf("current cluster: got %q, want test-mgmt", got)
+	}
+}
+
+func TestDestroyRejectsClusterArguments(t *testing.T) {
+	for _, arg := range []string{"hosted", "all", "test-mgmt"} {
+		t.Run(arg, func(t *testing.T) {
+			env := newTestEnv(t)
+			env.createClusters(t)
+
+			_, err := env.runErr(t, "destroy", arg, "--yes")
+
+			if err == nil || !strings.Contains(err.Error(), "select the cluster with --cluster <name>") {
+				t.Errorf("expected a hint to --cluster, got %v", err)
+			}
+			if destroys := len(env.hypershift.destroys) + len(env.images.destroys); destroys != 0 {
+				t.Errorf("expected nothing destroyed, got %d destroys", destroys)
+			}
+		})
 	}
 }
 
@@ -181,7 +227,7 @@ func TestDestroySkipsHostedClusterWithoutRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := env.run(t, "destroy", "hosted", "--yes")
+	out := env.run(t, "destroy", "--cluster", "test-mgmt-workload", "--yes")
 
 	if !strings.Contains(out, "Creation never started") {
 		t.Errorf("expected nothing to destroy, got:\n%s", out)
@@ -199,11 +245,8 @@ func TestDestroyClustersRecordedByEarlierVersions(t *testing.T) {
 	if err := os.CopyFS(data, os.DirFS(filepath.Join("testdata", "data"))); err != nil {
 		t.Fatal(err)
 	}
-	stateDir := filepath.Join(env.home, ".local/state/hyperctl")
-	mustMkdir(t, stateDir)
-	writeFile(t, filepath.Join(stateDir, "state.yaml"), "mgmtCluster: aws-mgmt\nhostedCluster: aws-mgmt-workload\n", 0o600)
 
-	env.run(t, "destroy", "--yes")
+	env.run(t, "destroy", "--cluster", "aws-mgmt", "--yes")
 
 	wantHosted := hypershift.DestroyClusterParams{Name: "aws-mgmt-workload", InfraID: "aws-mgmt-workload-abcde", Region: "eu-central-1", BaseDomain: "example.com"}
 	if got := single(t, env.hypershift.destroys).params; got != wantHosted {
@@ -228,7 +271,7 @@ func TestDestroyClustersRecordedByEarlierVersions(t *testing.T) {
 func TestCreateAfterDestroyHostedReusesManagementClusterSettings(t *testing.T) {
 	env := newTestEnv(t)
 	env.createClusters(t)
-	env.run(t, "destroy", "hosted", "--yes")
+	env.run(t, "destroy", "--cluster", "test-mgmt-workload", "--yes")
 
 	env.run(t, "create")
 
@@ -256,6 +299,18 @@ func (e *testEnv) createClusters(t *testing.T) {
 	)
 }
 
+// currentCluster returns the current cluster from the state.
+func (e *testEnv) currentCluster(t *testing.T) string {
+	t.Helper()
+	var st struct {
+		Current string `json:"current"`
+	}
+	if err := yaml.Unmarshal([]byte(readFile(t, filepath.Join(e.home, ".local/state/hyperctl/state.yaml"))), &st); err != nil {
+		t.Fatal(err)
+	}
+	return st.Current
+}
+
 // hostedInfraID returns the infra ID the hosted cluster was created with.
 func (e *testEnv) hostedInfraID(t *testing.T) string {
 	t.Helper()
@@ -279,6 +334,16 @@ func TestDestroySharedAWSResources(t *testing.T) {
 	}
 	if len(env.azure.deletedApplications)+len(env.azure.deletedResourceGroups) != 0 {
 		t.Errorf("expected no Azure resources deleted, got %v and %v", env.azure.deletedApplications, env.azure.deletedResourceGroups)
+	}
+}
+
+func TestDestroySharedRejectsFurtherArguments(t *testing.T) {
+	env := newTestEnv(t)
+
+	_, err := env.runErr(t, "destroy", "shared", "bogus", "--platform", "aws", "--yes")
+
+	if err == nil || !strings.Contains(err.Error(), `unexpected argument "bogus"`) {
+		t.Errorf("expected the argument to be rejected, got %v", err)
 	}
 }
 

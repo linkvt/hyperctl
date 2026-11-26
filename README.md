@@ -2,7 +2,7 @@
 
 Interactive CLI that creates a HyperShift management cluster on AWS or Azure for Karpenter development, optionally with an AutoNode hosted cluster, or a cluster without HyperShift.
 On AWS the cluster is OpenShift, installed with `openshift-install`; on Azure it is AKS.
-hyperctl tracks the clusters it creates, so `status`, `kubeconfig` and `destroy` need no cluster names.
+hyperctl tracks the clusters it creates and keeps a current cluster, like a kubectl context, so `status`, `kubeconfig`, `image` and `destroy` need no cluster names.
 
 ## Prerequisites
 
@@ -58,14 +58,17 @@ hyperctl destroy
 | Command | Purpose |
 |---|---|
 | `hyperctl create` | Create a cluster, optionally with the HyperShift operator and an AutoNode hosted cluster, skipping clusters that are installed |
-| `hyperctl status` | Show the clusters, whether the management cluster responds and the hosted cluster is available |
-| `hyperctl kubeconfig [hosted\|mgmt]` | Print the kubeconfig paths of both clusters for `KUBECONFIG`, or of one |
-| `hyperctl destroy [all\|hosted]` | Destroy the hosted and, by default, the management cluster |
+| `hyperctl list` | List the clusters, marking the current one with `*` |
+| `hyperctl use <name>` | Make a cluster the current cluster |
+| `hyperctl status` | Show the cluster and its management or hosted clusters, whether the management cluster responds and the hosted clusters are available |
+| `hyperctl kubeconfig` | Print the kubeconfig paths for `KUBECONFIG`: of a hosted cluster and its management cluster, or of a cluster without hosted cluster |
+| `hyperctl destroy` | Destroy the cluster, a management cluster after its hosted clusters |
 | `hyperctl destroy shared --platform aws\|azure` | Destroy the resources that the clusters of a platform share |
 | `hyperctl image karpenter-operator\|karpenter-provider <image>` | Override the Karpenter operator or Karpenter provider image of the hosted cluster (`--reset` to remove) |
 | `hyperctl releases [stream]` | List release streams or the accepted releases of a stream (`--all` for all) |
 | `hyperctl cache clean` | Remove cached installer binaries |
 
+`status`, `kubeconfig`, `image` and `destroy` act on the current cluster, or on the cluster named by `--cluster <name>`.
 `hyperctl <command> --help` lists all flags and defaults.
 
 ## Creating clusters
@@ -82,22 +85,28 @@ hyperctl create --platform azure --release 5.1.0-ec.0
 
 # AKS cluster without HyperShift
 hyperctl create --platform azure --setup standalone
+
+# A second management cluster next to the current one
+hyperctl create --name "$USER-second" --release 5.1.0-ec.0
+
+# A second hosted cluster on an existing management cluster
+hyperctl create --name "$USER-karpenter" --hosted-name "$USER-karpenter-2" --release 5.2.0-ec.1
 ```
 
 In a terminal, `create` asks for every value not given as a flag, prefilled with the defaults, and asks to confirm a summary.
 With `--yes`, or without a terminal, it asks nothing: it takes the defaults and fails if a required value is missing.
 
-- **Platform:** an existing management cluster determines the platform and `create` reports it; otherwise `create` asks for it, or uses `--platform` (default `aws`).
+- **Names:** `--name` names the standalone or management cluster, `--hosted-name` the hosted cluster, each new or existing. `create` asks for them first, prefilled with the current cluster, or its management cluster, and its hosted cluster, so that re-running `create` continues the current cluster. Without a current cluster, the names are `$USER-karpenter` and `<name>-workload`; with several hosted clusters, `<name>-workload` too. Names are unique across all clusters, a name of another cluster is rejected. The kubeconfig contexts are named after the clusters.
+- **Platform:** an existing cluster `--name` determines the platform and `create` reports it; otherwise `create` asks for it, or uses `--platform` (default `aws`).
 - **Setup:** `--setup hosted` creates a management cluster with an AutoNode hosted cluster, `management` the management cluster and HyperShift operator, `standalone` only the cluster, without anything HyperShift needs. `create` remembers the last choice. Flags the setup doesn't use, like `--hosted-name` without a hosted cluster or `--release` for a standalone AKS cluster, are rejected.
 - **Release:** not needed for an AKS cluster without HyperShift. A version of an official release (`5.1.0-ec.0`) or a release image pull spec, e.g. of a nightly. Interactively, `create` lets you browse the [release controller](https://amd64.ocp.releases.ci.openshift.org/). `create` checks that the pull secret can pull the release image before creating anything; CI release images need a login to the CI registry, and `create` explains how to add it to the pull secret.
 - **Size:** the size prompt offers presets for the cluster, see the platforms below. `--instance-type` and `--workers` skip it.
-- **Names:** the management cluster is `$USER-karpenter` and the hosted cluster `<name>-workload` unless `--name` and `--hosted-name` say otherwise. The kubeconfig contexts are named after them.
 - **Region:** `--region` is the AWS region or the Azure location. It defaults to the config file, then the last used region of the platform, then the region of the AWS profile or `westus3`.
 
-hyperctl tracks one cluster, with at most one hosted cluster; to create others, destroy them first.
-Re-running `create` skips installed clusters and creates the missing ones; with another setup it adds the HyperShift operator and the hosted cluster to an existing cluster. It installs the operator on every run, which updates it to the hypershift binary in use.
-An existing management cluster also determines the release, region, base domain and pull secret of its hosted cluster.
-A cluster whose creation did not complete has to be destroyed first; if only the hosted cluster failed, `hyperctl destroy hosted` keeps the management cluster.
+`create` skips installed clusters and creates the missing ones; with another setup it adds the HyperShift operator and the hosted cluster to an existing cluster, with another `--hosted-name` a further hosted cluster. It installs the operator on every run, which updates it to the hypershift binary in use.
+An existing management cluster determines the region, base domain and pull secret of its hosted clusters, `create` doesn't ask for them, and flags that differ are rejected. The release applies only to the clusters `create` creates: a new hosted cluster takes the release of its management cluster unless `--release` says otherwise, and `--release` without a cluster to create is rejected.
+Several `create` runs may run at the same time for different clusters.
+A cluster whose creation did not complete has to be destroyed first; if only the hosted cluster failed, `hyperctl destroy --cluster <hosted cluster>` keeps the management cluster.
 
 ### AWS
 
@@ -130,17 +139,24 @@ The service principal credentials and the signing key are kept in `~/.local/shar
 
 ## Destroying clusters
 
-`hyperctl destroy` destroys the hosted cluster and then the management cluster, `destroy hosted` only the hosted cluster.
+`hyperctl destroy` destroys the current cluster, `--cluster <name>` another one. A management cluster is destroyed after its hosted clusters, a hosted cluster alone keeps its management cluster.
+If the current cluster is destroyed, its management cluster becomes current, or there is no current cluster.
 It asks for confirmation; without a terminal it requires `--yes`.
 
 On AWS, `destroy` deletes the hosted cluster with hypershift and the management cluster with `openshift-install`, then DNS leftovers of both.
 On Azure, it deletes the hosted cluster with hypershift, together with its DNS records and workload identities, and then the resource group of the AKS cluster.
 If the management cluster is unreachable, the cloud resources of the hosted cluster are still deleted.
 
-`destroy shared --platform azure` deletes the shared Azure resources once no Azure management cluster is left.
+`destroy shared --platform azure` deletes the shared Azure resources once no Azure cluster is left.
 `destroy shared --platform aws` deletes nothing: the OIDC bucket is kept, and the EC2 Spot service-linked role belongs to the whole account.
 
 ## Working with clusters
+
+### Current cluster
+
+`create` makes the cluster it creates the current one, the management cluster for setup `hosted`.
+`hyperctl list` shows all clusters with their hosted clusters, and `hyperctl use <name>` selects another one, also a hosted cluster.
+A hosted cluster is reached through its management cluster: `image` acts on the only hosted cluster of the current management cluster, and with several on the one named by `--cluster`.
 
 ### Kubeconfig
 
@@ -149,16 +165,17 @@ If the management cluster is unreachable, the cloud resources of the hosted clus
 export KUBECONFIG=$(hyperctl kubeconfig)
 oc --context "$USER-karpenter" get hostedclusters -n clusters
 
-# Only one of them
-export KUBECONFIG=$(hyperctl kubeconfig mgmt)
+# A hosted cluster of a management cluster with several
+export KUBECONFIG=$(hyperctl kubeconfig --cluster "$USER-karpenter-workload")
 ```
 
 `kubeconfig` names each context after its cluster, so that both kubeconfigs work together in one `KUBECONFIG`.
-The hosted kubeconfig becomes available while the hosted cluster is still installing; until then, `kubeconfig` returns only the management cluster's.
+A management cluster with one hosted cluster prints both kubeconfigs, one with several only its own and lists the hosted clusters on stderr.
+The hosted kubeconfig becomes available while the hosted cluster is still installing; until then, `kubeconfig` returns only the management cluster's, or fails for a hosted cluster named by `--cluster`.
 
 ### Status
 
-`status` shows the tracked clusters, whether the management cluster responds and has the HyperShift operator, whether the hosted cluster is available and the image overrides.
+`status` shows the cluster with its hosted clusters, or a hosted cluster with its management cluster: whether the management cluster responds and has the HyperShift operator, whether the hosted clusters are available and the image overrides.
 It detects an unreachable management cluster, e.g. after its instances were pruned.
 
 ### Image overrides

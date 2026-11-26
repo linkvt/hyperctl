@@ -245,6 +245,67 @@ func TestClusterStoreForget(t *testing.T) {
 	}
 }
 
+func TestClusterStoreList(t *testing.T) {
+	store := newClusterStore(xdg.Dirs{Data: t.TempDir()})
+	aws := managementCluster("b-mgmt")
+	for _, c := range []clusterRef{aws, hostedCluster("b-mgmt", "b-workload-2"), hostedCluster("b-mgmt", "b-workload")} {
+		if err := store.begin(c, clusterRecord{Platform: platformAWS, PullSecret: "pull-secret.json", InfraID: "infra"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.begin(managementCluster("c-aks"), clusterRecord{Platform: platformAzure}); err != nil {
+		t.Fatal(err)
+	}
+	// Creating a-new never started.
+	if err := store.track(managementCluster("a-new")); err != nil {
+		t.Fatal(err)
+	}
+
+	clusters, err := store.list()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type entry struct {
+		ref      clusterRef
+		platform string
+		recorded bool
+	}
+	var got []entry
+	for _, c := range clusters {
+		got = append(got, entry{c.clusterRef, c.record.Platform, c.recorded})
+	}
+	want := []entry{
+		{managementCluster("a-new"), "", false},
+		{aws, platformAWS, true},
+		{hostedCluster("b-mgmt", "b-workload"), platformAWS, true},
+		{hostedCluster("b-mgmt", "b-workload-2"), platformAWS, true},
+		{managementCluster("c-aks"), platformAzure, true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("clusters:\ngot:  %+v\nwant: %+v", got, want)
+	}
+	if c, found := clusters.find("b-workload"); !found || c.clusterRef != hostedCluster("b-mgmt", "b-workload") {
+		t.Errorf("find b-workload: got %+v, %v", c, found)
+	}
+	if _, found := clusters.find("missing"); found {
+		t.Error("expected missing not to be found")
+	}
+	if got, want := clusters.hosted("b-mgmt").names(), []string{"b-workload", "b-workload-2"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("hosted clusters of b-mgmt: got %v, want %v", got, want)
+	}
+}
+
+func TestClusterStoreListWithoutClusters(t *testing.T) {
+	store := newClusterStore(xdg.Dirs{Data: t.TempDir()})
+
+	clusters, err := store.list()
+
+	if err != nil || len(clusters) != 0 {
+		t.Errorf("expected no clusters, got %v, %v", clusters, err)
+	}
+}
+
 // The fixtures in testdata/data were written by hyperctl before the cluster
 // record module, existing clusters must keep working.
 
