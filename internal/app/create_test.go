@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -8,6 +9,9 @@ import (
 	"testing"
 
 	"sigs.k8s.io/yaml"
+
+	"github.com/linkvt/hyperctl/internal/hypershift"
+	"github.com/linkvt/hyperctl/internal/ocp"
 )
 
 func TestCreateRunsInstallerWithReleaseAndInstallConfig(t *testing.T) {
@@ -21,19 +25,16 @@ func TestCreateRunsInstallerWithReleaseAndInstallConfig(t *testing.T) {
 		"--pull-secret", env.pullSecret,
 	)
 
-	calls := env.installerCalls(t)
+	calls := env.images.creates
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 installer call, got %d", len(calls))
 	}
 	call := calls[0]
-	if !strings.HasPrefix(call.args, "create cluster --dir ") {
-		t.Errorf("unexpected installer args: %q", call.args)
+	if want := filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/install"); call.installDir != want {
+		t.Errorf("install dir: got %q, want %q", call.installDir, want)
 	}
-	if want := "quay.io/openshift-release-dev/ocp-release:5.1.0-ec.0-x86_64"; call.releaseOverride != want {
-		t.Errorf("release override: got %q, want %q", call.releaseOverride, want)
-	}
-	if call.disableImagePolicy != "true" {
-		t.Errorf("image policy disable: got %q, want %q", call.disableImagePolicy, "true")
+	if want := "quay.io/openshift-release-dev/ocp-release:5.1.0-ec.0-x86_64"; call.release.PullSpec != want {
+		t.Errorf("release: got %q, want %q", call.release.PullSpec, want)
 	}
 
 	var installConfig struct {
@@ -86,7 +87,7 @@ func TestCreateUsesDefaultsForMissingValues(t *testing.T) {
 		} `json:"platform"`
 		PullSecret string `json:"pullSecret"`
 	}
-	if err := yaml.Unmarshal([]byte(env.installerCalls(t)[0].installConfig), &installConfig); err != nil {
+	if err := yaml.Unmarshal([]byte(env.images.creates[0].installConfig), &installConfig); err != nil {
 		t.Fatalf("parsing install-config: %v", err)
 	}
 	if installConfig.Metadata.Name != "tester-karpenter" {
@@ -128,7 +129,7 @@ sshKey: `+sshKey+`
 		PullSecret string `json:"pullSecret"`
 		SSHKey     string `json:"sshKey"`
 	}
-	if err := yaml.Unmarshal([]byte(env.installerCalls(t)[0].installConfig), &installConfig); err != nil {
+	if err := yaml.Unmarshal([]byte(env.images.creates[0].installConfig), &installConfig); err != nil {
 		t.Fatalf("parsing install-config: %v", err)
 	}
 	if installConfig.Platform.AWS.Region != "eu-west-1" {
@@ -158,7 +159,7 @@ func TestCreateExpandsHomeInConfigPaths(t *testing.T) {
 	var installConfig struct {
 		PullSecret string `json:"pullSecret"`
 	}
-	if err := yaml.Unmarshal([]byte(env.installerCalls(t)[0].installConfig), &installConfig); err != nil {
+	if err := yaml.Unmarshal([]byte(env.images.creates[0].installConfig), &installConfig); err != nil {
 		t.Fatalf("parsing install-config: %v", err)
 	}
 	if installConfig.PullSecret != testPullSecret {
@@ -182,9 +183,9 @@ func TestCreateDefaultsToLastUsedRelease(t *testing.T) {
 		"--pull-secret", env.pullSecret,
 	)
 
-	calls := env.installerCalls(t)
-	if want := "quay.io/openshift-release-dev/ocp-release:5.1.0-ec.0-x86_64"; calls[1].releaseOverride != want {
-		t.Errorf("release override: got %q, want %q", calls[1].releaseOverride, want)
+	calls := env.images.creates
+	if want := "quay.io/openshift-release-dev/ocp-release:5.1.0-ec.0-x86_64"; calls[1].release.PullSpec != want {
+		t.Errorf("release: got %q, want %q", calls[1].release.PullSpec, want)
 	}
 }
 
@@ -209,11 +210,11 @@ func TestCreateAcceptsReleasePullSpec(t *testing.T) {
 		"--pull-secret", env.pullSecret,
 	)
 
-	if got := env.installerCalls(t)[0].releaseOverride; got != pullSpec {
-		t.Errorf("release override: got %q, want %q", got, pullSpec)
+	if got := env.images.creates[0].release.PullSpec; got != pullSpec {
+		t.Errorf("release: got %q, want %q", got, pullSpec)
 	}
-	if want := "--release-image " + pullSpec; !strings.Contains(env.hypershiftCall(t, "create cluster ").args, want) {
-		t.Errorf("expected hosted cluster with %q", want)
+	if got := single(t, env.hypershift.clusters).params.ReleaseImage; got != pullSpec {
+		t.Errorf("hosted cluster release image: got %q, want %q", got, pullSpec)
 	}
 }
 
@@ -234,7 +235,7 @@ func TestCreateAddsSSHKeyToInstallConfig(t *testing.T) {
 	var installConfig struct {
 		SSHKey string `json:"sshKey"`
 	}
-	if err := yaml.Unmarshal([]byte(env.installerCalls(t)[0].installConfig), &installConfig); err != nil {
+	if err := yaml.Unmarshal([]byte(env.images.creates[0].installConfig), &installConfig); err != nil {
 		t.Fatalf("parsing install-config: %v", err)
 	}
 	if want := "ssh-ed25519 AAAA test@example.com"; installConfig.SSHKey != want {
@@ -256,10 +257,10 @@ func TestCreateReusesCachedInstaller(t *testing.T) {
 		env.run(t, "destroy", "--yes")
 	}
 
-	if got := env.ocCallCount(t); got != 1 {
+	if got := env.images.extractions; got != 1 {
 		t.Errorf("expected 1 installer extraction, got %d", got)
 	}
-	if got := len(env.installerCalls(t)); got != 2 {
+	if got := len(env.images.creates); got != 2 {
 		t.Errorf("expected 2 installer calls, got %d", got)
 	}
 }
@@ -275,8 +276,11 @@ func TestCreateKeepsInstallConfigCopy(t *testing.T) {
 		"--pull-secret", env.pullSecret,
 	)
 
-	kept := readFile(t, filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/install-config.yaml"))
-	if consumed := env.installerCalls(t)[0].installConfig; kept != consumed {
+	kept, err := os.ReadFile(filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/install-config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if consumed := env.images.creates[0].installConfig; string(kept) != consumed {
 		t.Errorf("kept install-config differs from the consumed one:\nkept:\n%s\nconsumed:\n%s", kept, consumed)
 	}
 }
@@ -296,7 +300,7 @@ func TestCreateRefusesAssumedRoleCredentials(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "assumed role") {
 		t.Errorf("expected assumed role error, got %v", err)
 	}
-	if got := env.ocCallCount(t) + len(env.installerCalls(t)); got != 0 {
+	if got := env.images.extractions + len(env.images.creates); got != 0 {
 		t.Errorf("expected no oc or installer calls, got %d", got)
 	}
 }
@@ -315,7 +319,7 @@ func TestCreateRequiresSpotServiceLinkedRole(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "AWSServiceRoleForEC2Spot") {
 		t.Errorf("expected missing Spot role error, got %v", err)
 	}
-	if got := len(env.installerCalls(t)); got != 0 {
+	if got := len(env.images.creates); got != 0 {
 		t.Errorf("expected no installer calls, got %d", got)
 	}
 }
@@ -364,16 +368,15 @@ func TestCreateInstallsHyperShiftOperator(t *testing.T) {
 		"--oidc-bucket", "my-oidc",
 	)
 
-	call := env.hypershiftCall(t, "install ")
-	want := "install" +
-		" --oidc-storage-provider-s3-bucket-name my-oidc" +
-		" --oidc-storage-provider-s3-credentials " + filepath.Join(env.home, ".aws", "credentials") +
-		" --oidc-storage-provider-s3-region us-east-2" +
-		" --tech-preview-no-upgrade" +
-		" --enable-standalone-karpenter-operator" +
-		" --wait-until-available"
-	if call.args != want {
-		t.Errorf("hypershift args:\ngot:  %s\nwant: %s", call.args, want)
+	call := single(t, env.hypershift.installs)
+	want := hypershift.InstallParams{
+		OIDCBucket:                  "my-oidc",
+		OIDCBucketRegion:            "us-east-2",
+		AWSCredentialsFile:          filepath.Join(env.home, ".aws", "credentials"),
+		StandaloneKarpenterOperator: true,
+	}
+	if call.params != want {
+		t.Errorf("hypershift install:\ngot:  %+v\nwant: %+v", call.params, want)
 	}
 	if want := filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/install/auth/kubeconfig"); call.kubeconfig != want {
 		t.Errorf("hypershift KUBECONFIG: got %q, want %q", call.kubeconfig, want)
@@ -393,9 +396,8 @@ func TestCreateEmbeddedKarpenterOperator(t *testing.T) {
 		"--oidc-bucket", "my-oidc",
 	)
 
-	call := env.hypershiftCall(t, "install ")
-	if strings.Contains(call.args, "--enable-standalone-karpenter-operator") {
-		t.Errorf("expected no standalone Karpenter operator, got hypershift args: %s", call.args)
+	if params := single(t, env.hypershift.installs).params; params.StandaloneKarpenterOperator {
+		t.Errorf("expected no standalone Karpenter operator, got hypershift install %+v", params)
 	}
 }
 
@@ -411,15 +413,8 @@ func TestCreateManagementOnlySkipsHostedCluster(t *testing.T) {
 		"--pull-secret", env.pullSecret,
 	)
 
-	var installs, hostedCreates int
-	for _, call := range env.hypershiftCalls(t) {
-		if strings.HasPrefix(call.args, "install ") {
-			installs++
-		}
-		if strings.HasPrefix(call.args, "create cluster ") {
-			hostedCreates++
-		}
-	}
+	installs := len(env.hypershift.installs)
+	hostedCreates := len(env.hypershift.clusters)
 	if installs != 1 || hostedCreates != 0 {
 		t.Errorf("expected one operator install and no hosted cluster creation, got %d installs and %d hosted creates", installs, hostedCreates)
 	}
@@ -468,10 +463,8 @@ func TestCreateRemembersManagementOnlyMode(t *testing.T) {
 	}
 	env.run(t, args...)
 
-	for _, call := range env.hypershiftCalls(t) {
-		if strings.HasPrefix(call.args, "create cluster ") {
-			t.Errorf("remembered management-only mode created a hosted cluster: %s", call.args)
-		}
+	for _, call := range env.hypershift.clusters {
+		t.Errorf("remembered management-only mode created a hosted cluster: %+v", call.params)
 	}
 
 	var state struct {
@@ -507,13 +500,7 @@ func TestCreateCanOverrideRememberedManagementOnlyMode(t *testing.T) {
 	}
 	env.run(t, args...)
 
-	var hostedCreates int
-	for _, call := range env.hypershiftCalls(t) {
-		if strings.HasPrefix(call.args, "create cluster ") {
-			hostedCreates++
-		}
-	}
-	if hostedCreates != 1 {
+	if hostedCreates := len(env.hypershift.clusters); hostedCreates != 1 {
 		t.Errorf("expected explicit management-only=false to create one hosted cluster, got %d", hostedCreates)
 	}
 }
@@ -529,20 +516,21 @@ func TestCreateCreatesHostedClusterWithAutoNode(t *testing.T) {
 		"--pull-secret", env.pullSecret,
 	)
 
-	call := env.hypershiftCall(t, "create cluster ")
-	want := "^create cluster aws" +
-		" --name test-mgmt-workload" +
-		" --infra-id test-mgmt-workload-[a-z0-9]{5}" +
-		" --region eu-central-1" +
-		" --base-domain example.com" +
-		" --pull-secret " + regexp.QuoteMeta(env.pullSecret) +
-		" --release-image quay\\.io/openshift-release-dev/ocp-release:5\\.1\\.0-ec\\.0-x86_64" +
-		" --node-pool-replicas 1" +
-		" --auto-node" +
-		" --wait" +
-		" --timeout 45m0s$"
-	if !regexp.MustCompile(want).MatchString(call.args) {
-		t.Errorf("hypershift args:\ngot:  %s\nwant: %s", call.args, want)
+	call := single(t, env.hypershift.clusters)
+	params := call.params
+	if !regexp.MustCompile(`^test-mgmt-workload-[a-z0-9]{5}$`).MatchString(params.InfraID) {
+		t.Errorf("infra ID: got %q", params.InfraID)
+	}
+	params.InfraID = ""
+	want := hypershift.CreateClusterParams{
+		Name:         "test-mgmt-workload",
+		Region:       "eu-central-1",
+		BaseDomain:   "example.com",
+		PullSecret:   env.pullSecret,
+		ReleaseImage: "quay.io/openshift-release-dev/ocp-release:5.1.0-ec.0-x86_64",
+	}
+	if params != want {
+		t.Errorf("hypershift create cluster:\ngot:  %+v\nwant: %+v", params, want)
 	}
 	if want := filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/install/auth/kubeconfig"); call.kubeconfig != want {
 		t.Errorf("hypershift KUBECONFIG: got %q, want %q", call.kubeconfig, want)
@@ -551,7 +539,7 @@ func TestCreateCreatesHostedClusterWithAutoNode(t *testing.T) {
 
 func TestCreateRequiresHypershiftBinary(t *testing.T) {
 	env := newTestEnv(t)
-	env.moveHypershiftOutOfPath(t)
+	env.hypershift.path = ""
 
 	_, err := env.runErr(t, "create",
 		"--release", "5.1.0-ec.0",
@@ -563,14 +551,16 @@ func TestCreateRequiresHypershiftBinary(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "hypershift") {
 		t.Errorf("expected missing hypershift error, got %v", err)
 	}
-	if got := len(env.installerCalls(t)); got != 0 {
+	if got := len(env.images.creates); got != 0 {
 		t.Errorf("expected no installer calls, got %d", got)
 	}
 }
 
 func TestCreateUsesHypershiftFromConfig(t *testing.T) {
 	env := newTestEnv(t)
-	path := env.moveHypershiftOutOfPath(t)
+	const path = "/opt/hypershift/bin/hypershift"
+	env.hypershift.path = ""
+	env.hypershift.binaries = append(env.hypershift.binaries, path)
 	configPath := filepath.Join(env.home, ".config", "hyperctl", "config.yaml")
 	mustMkdir(t, filepath.Dir(configPath))
 	writeFile(t, configPath, "hypershift: "+path+"\n", 0o600)
@@ -582,7 +572,9 @@ func TestCreateUsesHypershiftFromConfig(t *testing.T) {
 		"--pull-secret", env.pullSecret,
 	)
 
-	env.hypershiftCall(t, "create cluster ")
+	if got := single(t, env.hypershift.clusters).path; got != path {
+		t.Errorf("hypershift binary: got %s, want %s", got, path)
+	}
 }
 
 func TestCreateSkipsInstalledCluster(t *testing.T) {
@@ -598,7 +590,7 @@ func TestCreateSkipsInstalledCluster(t *testing.T) {
 		)
 	}
 
-	if got := len(env.installerCalls(t)); got != 1 {
+	if got := len(env.images.creates); got != 1 {
 		t.Errorf("expected 1 installer call, got %d", got)
 	}
 }
@@ -612,18 +604,18 @@ func TestCreateRefusesIncompleteInstallation(t *testing.T) {
 		"--name", "test-mgmt",
 		"--pull-secret", env.pullSecret,
 	}
-	t.Setenv("HYPERCTL_TEST_INSTALLER_FAIL", "1")
+	env.images.installErr = errors.New("openshift-install create cluster: exit status 1")
 	if _, err := env.runErr(t, args...); err == nil {
 		t.Fatal("expected failing installer to fail create")
 	}
-	t.Setenv("HYPERCTL_TEST_INSTALLER_FAIL", "")
+	env.images.installErr = nil
 
 	_, err := env.runErr(t, args...)
 
 	if err == nil || !strings.Contains(err.Error(), "did not complete") {
 		t.Errorf("expected incomplete installation error, got %v", err)
 	}
-	if got := len(env.installerCalls(t)); got != 1 {
+	if got := len(env.images.creates); got != 1 {
 		t.Errorf("expected 1 installer call, got %d", got)
 	}
 }
@@ -640,13 +632,7 @@ func TestCreateSkipsCreatedHostedCluster(t *testing.T) {
 		)
 	}
 
-	var creates int
-	for _, call := range env.hypershiftCalls(t) {
-		if strings.HasPrefix(call.args, "create cluster ") {
-			creates++
-		}
-	}
-	if creates != 1 {
+	if creates := len(env.hypershift.clusters); creates != 1 {
 		t.Errorf("expected 1 hosted cluster creation, got %d", creates)
 	}
 }
@@ -665,57 +651,9 @@ func TestCreateRefusesSecondManagementCluster(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "test-mgmt") {
 		t.Errorf("expected error about existing management cluster test-mgmt, got %v", err)
 	}
-	if got := len(env.installerCalls(t)); got != 1 {
+	if got := len(env.images.creates); got != 1 {
 		t.Errorf("expected 1 installer call, got %d", got)
 	}
-}
-
-// installerCall is one recorded invocation of the fake openshift-install.
-type installerCall struct {
-	args               string
-	releaseOverride    string
-	disableImagePolicy string
-	installConfig      string
-}
-
-// installerCalls reads the "create cluster" invocations recorded by the fake
-// openshift-install.
-func (e *testEnv) installerCalls(t *testing.T) []installerCall {
-	t.Helper()
-	dirs, err := filepath.Glob(filepath.Join(e.logDir, "openshift-install-*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var calls []installerCall
-	for _, dir := range dirs {
-		args := readFile(t, filepath.Join(dir, "args"))
-		if !strings.HasPrefix(args, "create ") {
-			continue
-		}
-		calls = append(calls, installerCall{
-			args:               args,
-			releaseOverride:    readFile(t, filepath.Join(dir, "release-override")),
-			disableImagePolicy: readFile(t, filepath.Join(dir, "disable-image-policy")),
-			installConfig:      readFile(t, filepath.Join(dir, "install-config.yaml")),
-		})
-	}
-	return calls
-}
-
-// ocCallCount returns how often the fake oc extracted an installer.
-func (e *testEnv) ocCallCount(t *testing.T) int {
-	t.Helper()
-	dirs, err := filepath.Glob(filepath.Join(e.logDir, "oc-*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var count int
-	for _, dir := range dirs {
-		if strings.HasPrefix(readFile(t, filepath.Join(dir, "args")), "adm release extract ") {
-			count++
-		}
-	}
-	return count
 }
 
 func readFile(t *testing.T, path string) string {
@@ -729,7 +667,7 @@ func readFile(t *testing.T, path string) string {
 
 func TestCreateFailsEarlyWhenReleaseImageIsNotPullable(t *testing.T) {
 	env := newTestEnv(t)
-	t.Setenv("HYPERCTL_TEST_RELEASE_INFO_ERROR", "error: unable to read image: unauthorized: authentication required")
+	env.images.pullErr = errors.New("the release image cannot be pulled:\nerror: unable to read image: unauthorized: authentication required")
 
 	_, err := env.runErr(t, "create",
 		"--release", "registry.ci.openshift.org/ocp/release-5:5.1.0-0.nightly-2026-09-25-074941",
@@ -743,7 +681,7 @@ func TestCreateFailsEarlyWhenReleaseImageIsNotPullable(t *testing.T) {
 			t.Errorf("expected error containing %q, got %v", want, err)
 		}
 	}
-	if calls := env.installerCalls(t); len(calls) != 0 {
+	if calls := env.images.creates; len(calls) != 0 {
 		t.Errorf("expected no installer calls, got %d", len(calls))
 	}
 }
@@ -758,8 +696,8 @@ func TestCreateChecksReleaseImageWithPullSecret(t *testing.T) {
 		"--pull-secret", env.pullSecret,
 	)
 
-	want := "adm release info --registry-config=" + env.pullSecret + " quay.io/openshift-release-dev/ocp-release:5.1.0-ec.0-x86_64"
-	if calls := env.ocCalls(t, want); len(calls) == 0 {
-		t.Errorf("expected oc call %q", want)
+	want := pullCheck{release: ocp.ParseRelease("5.1.0-ec.0"), pullSecret: env.pullSecret}
+	if checks := env.images.pullChecks; len(checks) != 1 || checks[0] != want {
+		t.Errorf("pull checks: got %+v, want %+v", checks, want)
 	}
 }

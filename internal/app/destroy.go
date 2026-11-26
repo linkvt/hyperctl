@@ -12,7 +12,6 @@ import (
 
 	"github.com/linkvt/hyperctl/internal/azureaccount"
 	"github.com/linkvt/hyperctl/internal/hypershift"
-	"github.com/linkvt/hyperctl/internal/oc"
 	"github.com/linkvt/hyperctl/internal/ocp"
 	"github.com/linkvt/hyperctl/internal/xdg"
 )
@@ -78,7 +77,7 @@ func runDestroy(ctx context.Context, cmd *cli.Command, deps Deps) error {
 	if st.HostedCluster != "" {
 		p.step("Hosted cluster %s", st.HostedCluster)
 		if platform == platformAzure {
-			err = destroyAzureHostedCluster(ctx, p, deps.Azure, dirs, st.MgmtCluster, st.HostedCluster)
+			err = destroyAzureHostedCluster(ctx, p, deps.Azure, deps.Cluster, dirs, st.MgmtCluster, st.HostedCluster)
 		} else {
 			err = destroyAWSHostedCluster(ctx, p, cmd, deps, dirs, st.MgmtCluster, st.HostedCluster)
 		}
@@ -173,11 +172,7 @@ func destroyAWSHostedCluster(ctx context.Context, p progress, cmd *cli.Command, 
 	if err != nil {
 		return err
 	}
-	hs := hypershift.CLI{
-		Path:       hypershiftPath,
-		Kubeconfig: mgmtKubeconfigPath(dirs, mgmt),
-		Output:     p.tool("hypershift"),
-	}
+	hs := deps.Hypershift(hypershiftPath, mgmtKubeconfigPath(dirs, mgmt), p.tool("hypershift"))
 	return destroyHostedCluster(ctx, p, cmd.Bool("yes"), deps, hs, dirs, mgmt, hosted)
 }
 
@@ -193,7 +188,7 @@ func destroyTargets(st state, scope string) []string {
 	return targets
 }
 
-func destroyHostedCluster(ctx context.Context, p progress, yes bool, deps Deps, hs hypershift.CLI, dirs xdg.Dirs, mgmt, hosted string) error {
+func destroyHostedCluster(ctx context.Context, p progress, yes bool, deps Deps, hs Hypershift, dirs xdg.Dirs, mgmt, hosted string) error {
 	dir := hostedDir(dirs, mgmt, hosted)
 	record, found, err := loadClusterRecord(dir)
 	if err != nil {
@@ -211,7 +206,7 @@ func destroyHostedCluster(ctx context.Context, p progress, yes bool, deps Deps, 
 	}
 	var ready bool
 	_ = p.wait(ctx, "Checking the management cluster API", func(ctx context.Context) error {
-		ready = oc.Ready(ctx, hs.Kubeconfig)
+		ready = deps.Cluster.Ready(ctx, mgmtKubeconfigPath(dirs, mgmt))
 		return nil
 	})
 	start := time.Now()
@@ -246,13 +241,13 @@ func destroyMgmtCluster(ctx context.Context, p progress, yes bool, deps Deps, di
 		p.done("Installation never started, nothing to destroy")
 		return os.RemoveAll(dir)
 	}
-	installer, err := ensureInstaller(ctx, p, dirs, ocp.ParseRelease(record.Release), record.PullSecret)
+	installer, err := ensureInstaller(ctx, p, deps.ReleaseImages, dirs, ocp.ParseRelease(record.Release), record.PullSecret)
 	if err != nil {
 		return err
 	}
 	p.info("Destroying")
 	start := time.Now()
-	if err := installer.DestroyCluster(ctx, installDir(dirs, name), p.tool("openshift-install")); err != nil {
+	if err := deps.ReleaseImages.DestroyCluster(ctx, installer, installDir(dirs, name), p.tool("openshift-install")); err != nil {
 		return err
 	}
 	p.done("Destroyed management cluster %s (%s)", name, since(start))

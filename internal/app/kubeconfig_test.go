@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,7 +78,7 @@ func TestKubeconfigNamesEntriesAfterClusters(t *testing.T) {
 
 func TestKubeconfigWithoutHostedClusterPrintsMgmt(t *testing.T) {
 	env := newTestEnv(t)
-	t.Setenv("HYPERCTL_TEST_HYPERSHIFT_FAIL", "install")
+	env.hypershift.installErr = errors.New("hypershift install: exit status 1")
 	_, _ = env.runErr(t, "create",
 		"--release", "5.1.0-ec.0",
 		"--region", "eu-central-1",
@@ -94,32 +95,26 @@ func TestKubeconfigWithoutHostedClusterPrintsMgmt(t *testing.T) {
 
 func TestKubeconfigDuringHostedInstallation(t *testing.T) {
 	tests := map[string]struct {
-		cluster     string
-		secret      string
-		available   bool
+		cluster string
+		// published makes hypershift publish the hosted kubeconfig.
+		published   bool
 		lookupError string
 		wantServers []string
 		wantError   string
 	}{
 		"hosted before installation finishes": {
-			cluster: "hosted", secret: "workload-admin", available: true,
+			cluster: "hosted", published: true,
 			wantServers: []string{"https://api.hosted.fake:6443"},
 		},
 		"both before installation finishes, hosted first": {
-			secret: "workload-admin", available: true,
+			published:   true,
 			wantServers: []string{"https://api.hosted.fake:6443", "https://api.mgmt.fake:6443"},
 		},
-		"default before secret reference exists": {
+		"default before kubeconfig is published": {
 			wantServers: []string{"https://api.mgmt.fake:6443"},
 		},
-		"hosted before secret reference exists": {
+		"hosted before kubeconfig is published": {
 			cluster: "hosted", wantError: "hosted kubeconfig not available yet",
-		},
-		"default before secret exists": {
-			secret: "workload-admin", wantServers: []string{"https://api.mgmt.fake:6443"},
-		},
-		"hosted before secret exists": {
-			cluster: "hosted", secret: "workload-admin", wantError: "hosted kubeconfig not available yet",
 		},
 		"default surfaces authorization failure": {
 			lookupError: "Forbidden: cannot get hostedclusters", wantError: "Forbidden",
@@ -138,12 +133,11 @@ func TestKubeconfigDuringHostedInstallation(t *testing.T) {
 			dir := env.startHostedInstallation(t)
 			recordPath := filepath.Join(dir, "cluster.yaml")
 			record := readFile(t, recordPath)
-			t.Setenv("HYPERCTL_TEST_HOSTED_KUBECONFIG_SECRET", tc.secret)
-			t.Setenv("HYPERCTL_TEST_KUBECONFIG_ERROR", tc.lookupError)
-			if tc.available {
-				secretPath := filepath.Join(env.logDir, "hosted-kubeconfig")
-				writeFile(t, secretPath, testHostedKubeconfig, 0o600)
-				t.Setenv("HYPERCTL_TEST_HOSTED_KUBECONFIG", secretPath)
+			if tc.published {
+				env.cluster.hostedClusters["test-mgmt-workload"].kubeconfig = []byte(testHostedKubeconfig)
+			}
+			if tc.lookupError != "" {
+				env.cluster.hostedKubeconfigErr = errors.New(tc.lookupError)
 			}
 
 			args := []string{"kubeconfig"}
@@ -176,11 +170,11 @@ func TestKubeconfigDuringHostedInstallation(t *testing.T) {
 				t.Error("fetching kubeconfig changed the installation record")
 			}
 			if tc.cluster == "mgmt" {
-				if calls := env.ocCalls(t, "get hostedcluster"); len(calls) != 0 {
-					t.Errorf("mgmt queried the hosted cluster: %v", calls)
+				if lookups := env.cluster.hostedKubeconfigLookups; lookups != 0 {
+					t.Errorf("mgmt queried the hosted cluster %d times", lookups)
 				}
 			}
-			if !tc.available {
+			if !tc.published {
 				if _, err := os.Stat(filepath.Join(dir, "kubeconfig")); !os.IsNotExist(err) {
 					t.Errorf("unexpected hosted kubeconfig file: %v", err)
 				}
@@ -198,16 +192,15 @@ func TestKubeconfigDuringHostedInstallation(t *testing.T) {
 			if got := readKubeconfig(t, path); got.CurrentContext != "test-mgmt-workload" || got.Users[0].Name != "test-mgmt-workload-admin" {
 				t.Error("hosted kubeconfig entries were not named after the cluster")
 			}
-			calls := env.ocCalls(t, "get secret")
-			if len(calls) != 1 || !strings.Contains(calls[0], "get secret "+tc.secret+" -n clusters") {
-				t.Errorf("expected retrieval of referenced secret, got %v", calls)
+			if lookups := env.cluster.hostedKubeconfigLookups; lookups != 1 {
+				t.Errorf("expected one hosted kubeconfig lookup, got %d", lookups)
 			}
-			t.Setenv("HYPERCTL_TEST_KUBECONFIG_ERROR", "connection refused")
+			env.cluster.hostedKubeconfigErr = errors.New("connection refused")
 			if cached := env.run(t, args...); cached != out {
 				t.Errorf("cached output: got %q, want %q", cached, out)
 			}
-			if calls := env.ocCalls(t, "get hostedcluster"); len(calls) != 1 {
-				t.Errorf("cached kubeconfig queried the cluster: %v", calls)
+			if lookups := env.cluster.hostedKubeconfigLookups; lookups != 1 {
+				t.Errorf("cached kubeconfig queried the cluster, got %d lookups", lookups)
 			}
 		})
 	}
@@ -216,14 +209,14 @@ func TestKubeconfigDuringHostedInstallation(t *testing.T) {
 func TestKubeconfigCachedFilesWorkOffline(t *testing.T) {
 	env := newTestEnv(t)
 	env.createClusters(t)
-	t.Setenv("HYPERCTL_TEST_KUBECONFIG_ERROR", "connection refused")
+	env.cluster.hostedKubeconfigErr = errors.New("connection refused")
 
 	env.run(t, "kubeconfig")
 	env.run(t, "kubeconfig", "hosted")
 	env.run(t, "kubeconfig", "mgmt")
 
-	if calls := env.ocCalls(t, "get hostedcluster"); len(calls) != 0 {
-		t.Errorf("cached kubeconfigs queried the cluster: %v", calls)
+	if lookups := env.cluster.hostedKubeconfigLookups; lookups != 0 {
+		t.Errorf("cached kubeconfigs queried the cluster %d times", lookups)
 	}
 }
 
@@ -258,7 +251,7 @@ type kubeconfigFile struct {
 
 func (e *testEnv) startHostedInstallation(t *testing.T) string {
 	t.Helper()
-	t.Setenv("HYPERCTL_TEST_HYPERSHIFT_FAIL", "create")
+	e.hypershift.createClusterErr = errors.New("hypershift create cluster: exit status 1")
 	if _, err := e.runErr(t, "create",
 		"--release", "5.1.0-ec.0",
 		"--region", "eu-central-1",

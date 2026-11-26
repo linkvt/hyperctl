@@ -9,11 +9,10 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/linkvt/hyperctl/internal/oc"
 	"github.com/linkvt/hyperctl/internal/xdg"
 )
 
-func kubeconfigCommand() *cli.Command {
+func kubeconfigCommand(deps Deps) *cli.Command {
 	return &cli.Command{
 		Name:      "kubeconfig",
 		Usage:     "Print the kubeconfig paths of the hosted and management cluster, usable as KUBECONFIG",
@@ -27,7 +26,7 @@ func kubeconfigCommand() *cli.Command {
 			if err != nil {
 				return err
 			}
-			kubeconfigs, err := selectKubeconfigs(ctx, dirs, s, cmd.Args().First())
+			kubeconfigs, err := selectKubeconfigs(ctx, deps.Cluster, dirs, s, cmd.Args().First())
 			if err != nil {
 				return err
 			}
@@ -53,7 +52,7 @@ type kubeconfigFile struct {
 // selectKubeconfigs returns the kubeconfig of the hosted or management
 // cluster, or of both with the hosted cluster first, which makes it the
 // current context of a merged KUBECONFIG.
-func selectKubeconfigs(ctx context.Context, dirs xdg.Dirs, s state, cluster string) ([]kubeconfigFile, error) {
+func selectKubeconfigs(ctx context.Context, api ClusterAPI, dirs xdg.Dirs, s state, cluster string) ([]kubeconfigFile, error) {
 	if s.MgmtCluster == "" {
 		return nil, errors.New("no management cluster, run hyperctl create")
 	}
@@ -67,7 +66,7 @@ func selectKubeconfigs(ctx context.Context, dirs xdg.Dirs, s state, cluster stri
 		}
 		hostedExists = err == nil
 		if !hostedExists {
-			content, err := oc.HostedKubeconfig(ctx, mgmt.path, s.HostedCluster)
+			content, err := api.HostedKubeconfig(ctx, mgmt.path, s.HostedCluster)
 			if err != nil {
 				return nil, err
 			}

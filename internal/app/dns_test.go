@@ -45,7 +45,7 @@ func TestCreateRequiresConfirmationForDNSLeftovers(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "A api.test-mgmt.example.com.") || !strings.Contains(err.Error(), "--yes") {
 		t.Errorf("expected error listing DNS leftovers and --yes, got %v", err)
 	}
-	if got := len(env.installerCalls(t)); got != 0 {
+	if got := len(env.images.creates); got != 0 {
 		t.Errorf("expected no installer calls, got %d", got)
 	}
 }

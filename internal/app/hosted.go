@@ -12,7 +12,7 @@ import (
 
 // ensureHostedCluster creates the hosted cluster with AutoNode and writes its
 // kubeconfig, unless it is already created.
-func ensureHostedCluster(ctx context.Context, p progress, hs hypershift.CLI, dirs xdg.Dirs, opts createOptions) error {
+func ensureHostedCluster(ctx context.Context, p progress, hs Hypershift, dirs xdg.Dirs, opts createOptions) error {
 	dir := hostedDir(dirs, opts.Name, opts.HostedName)
 	record, found, err := loadClusterRecord(dir)
 	if err != nil {

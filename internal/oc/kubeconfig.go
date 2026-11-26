@@ -8,8 +8,8 @@ import (
 
 // HostedKubeconfig returns the hosted cluster's admin kubeconfig, or nil if
 // its reference or secret does not exist yet.
-func HostedKubeconfig(ctx context.Context, kubeconfig, name string) ([]byte, error) {
-	out, err := run(ctx, kubeconfig, "get", "hostedcluster", name, "-n", "clusters",
+func (c CLI) HostedKubeconfig(ctx context.Context, kubeconfig, name string) ([]byte, error) {
+	out, err := c.run(ctx, kubeconfig, "get", "hostedcluster", name, "-n", "clusters",
 		"--ignore-not-found", "--request-timeout=10s", "-o", "json")
 	if err != nil {
 		return nil, fmt.Errorf("getting hosted cluster %s: %w", name, err)
@@ -31,7 +31,7 @@ func HostedKubeconfig(ctx context.Context, kubeconfig, name string) ([]byte, err
 	if secretName == "" {
 		return nil, nil
 	}
-	out, err = run(ctx, kubeconfig, "get", "secret", secretName, "-n", "clusters",
+	out, err = c.run(ctx, kubeconfig, "get", "secret", secretName, "-n", "clusters",
 		"--ignore-not-found", "--request-timeout=10s", "-o", "json")
 	if err != nil {
 		return nil, fmt.Errorf("getting hosted kubeconfig secret %s: %w", secretName, err)

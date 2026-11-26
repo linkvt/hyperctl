@@ -46,7 +46,7 @@ func TestCreateManagementClusterSize(t *testing.T) {
 				"--pull-secret", env.pullSecret,
 			}, tc.args...)...)
 
-			if got := parseMgmtSize(t, env.installerCalls(t)[0].installConfig); !got.equal(tc.want) {
+			if got := parseMgmtSize(t, env.images.creates[0].installConfig); !got.equal(tc.want) {
 				t.Errorf("got %+v, want %+v", got, tc.want)
 			}
 		})

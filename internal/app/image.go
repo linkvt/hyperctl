@@ -7,7 +7,6 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/linkvt/hyperctl/internal/oc"
 	"github.com/linkvt/hyperctl/internal/xdg"
 )
 
@@ -43,7 +42,7 @@ var imageComponents = []imageComponent{
 	},
 }
 
-func imageCommand() *cli.Command {
+func imageCommand(deps Deps) *cli.Command {
 	var commands []*cli.Command
 	for _, component := range imageComponents {
 		commands = append(commands, &cli.Command{
@@ -54,7 +53,7 @@ func imageCommand() *cli.Command {
 				&cli.BoolFlag{Name: "reset", Usage: "Remove the override and use the image of the release"},
 			},
 			Action: func(ctx context.Context, cmd *cli.Command) error {
-				return runImage(ctx, cmd, component)
+				return runImage(ctx, cmd, deps.Cluster, component)
 			},
 		})
 	}
@@ -65,7 +64,7 @@ func imageCommand() *cli.Command {
 	}
 }
 
-func runImage(ctx context.Context, cmd *cli.Command, component imageComponent) error {
+func runImage(ctx context.Context, cmd *cli.Command, cluster ClusterAPI, component imageComponent) error {
 	image := cmd.Args().First()
 	reset := cmd.Bool("reset")
 	if (image == "") == !reset {
@@ -85,7 +84,7 @@ func runImage(ctx context.Context, cmd *cli.Command, component imageComponent) e
 	}
 	kubeconfig := mgmtKubeconfigPath(dirs, st.MgmtCluster)
 	namespace := component.namespace(st.HostedCluster)
-	annotations, err := oc.Annotations(ctx, kubeconfig, component.kind, namespace, st.HostedCluster)
+	annotations, err := cluster.Annotations(ctx, kubeconfig, component.kind, namespace, st.HostedCluster)
 	if err != nil {
 		return err
 	}
@@ -96,17 +95,17 @@ func runImage(ctx context.Context, cmd *cli.Command, component imageComponent) e
 	case reset && !set:
 		p.done("No %s image override set", component.title)
 	case reset:
-		if err := oc.RemoveAnnotation(ctx, kubeconfig, component.kind, namespace, st.HostedCluster, component.annotation); err != nil {
+		if err := cluster.RemoveAnnotation(ctx, kubeconfig, component.kind, namespace, st.HostedCluster, component.annotation); err != nil {
 			return err
 		}
 		p.done("Removed the %s image override, the deployment rolls out with the release image", component.title)
 	case current != image:
-		if err := oc.Annotate(ctx, kubeconfig, component.kind, namespace, st.HostedCluster, component.annotation, image); err != nil {
+		if err := cluster.Annotate(ctx, kubeconfig, component.kind, namespace, st.HostedCluster, component.annotation, image); err != nil {
 			return err
 		}
 		p.done("Set the %s image to %s, the deployment rolls out", component.title, image)
 	default:
-		return restartPods(ctx, p, kubeconfig, st.HostedCluster, component)
+		return restartPods(ctx, p, cluster, kubeconfig, st.HostedCluster, component)
 	}
 	return nil
 }
@@ -122,8 +121,8 @@ func (c imageComponent) namespace(hosted string) string {
 // restartPods deletes the component's pods, so that they start with the
 // unchanged image again. Nodes may serve it from their image cache, only a
 // unique tag reliably rolls out a rebuilt image.
-func restartPods(ctx context.Context, p progress, kubeconfig, hosted string, component imageComponent) error {
-	if err := oc.DeletePods(ctx, kubeconfig, controlPlaneNamespace(hosted), component.selector); err != nil {
+func restartPods(ctx context.Context, p progress, cluster ClusterAPI, kubeconfig, hosted string, component imageComponent) error {
+	if err := cluster.DeletePods(ctx, kubeconfig, controlPlaneNamespace(hosted), component.selector); err != nil {
 		return err
 	}
 	p.done("The %s image is unchanged, restarted its pods", component.title)

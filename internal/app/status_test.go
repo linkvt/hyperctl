@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"errors"
 	"path/filepath"
 	"regexp"
 	"testing"
@@ -43,9 +44,9 @@ func TestStatus(t *testing.T) {
 			env := newTestEnv(t)
 			env.createClusters(t)
 			if tc.apiDown {
-				t.Setenv("HYPERCTL_TEST_API_DOWN", "1")
+				env.cluster.apiDown = true
 			}
-			t.Setenv("HYPERCTL_TEST_HOSTED_AVAILABLE", tc.hostedAvailable)
+			env.cluster.hostedClusters["test-mgmt-workload"].available = tc.hostedAvailable
 
 			out := env.run(t, "status")
 
@@ -60,7 +61,7 @@ func TestStatus(t *testing.T) {
 
 func TestStatusShowsIncompleteInstallation(t *testing.T) {
 	env := newTestEnv(t)
-	t.Setenv("HYPERCTL_TEST_INSTALLER_FAIL", "1")
+	env.images.installErr = errors.New("openshift-install create cluster: exit status 1")
 	if _, err := env.runErr(t, "create",
 		"--release", "5.1.0-ec.0",
 		"--region", "eu-central-1",
@@ -85,7 +86,7 @@ func TestStatusShowsIncompleteInstallation(t *testing.T) {
 
 func TestStatusShowsHostedOnlyCleanupForIncompleteHostedInstallation(t *testing.T) {
 	env := newTestEnv(t)
-	t.Setenv("HYPERCTL_TEST_HYPERSHIFT_FAIL", "create")
+	env.hypershift.createClusterErr = errors.New("hypershift create cluster: exit status 1")
 	if _, err := env.runErr(t, "create",
 		"--release", "5.1.0-ec.0",
 		"--region", "eu-central-1",
