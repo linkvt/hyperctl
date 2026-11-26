@@ -63,7 +63,7 @@ func TestAWSCreateOptions(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("USER", tc.user)
 			aws := awsPlatform{deps: Deps{DefaultRegion: "us-east-2"}}
-			run, err := aws.newCreate(parseCreateFlags(t, tc.args...), tc.st, tc.cfg)
+			run, err := aws.newCreate(parseCreateFlags(t, tc.args...), tc.st, tc.cfg, setupHosted)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -114,7 +114,7 @@ func TestAzureCreateOptions(t *testing.T) {
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			run, err := azurePlatform{}.newCreate(parseCreateFlags(t, tc.args...), tc.st, tc.cfg)
+			run, err := azurePlatform{}.newCreate(parseCreateFlags(t, tc.args...), tc.st, tc.cfg, setupHosted)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Errorf("expected an error containing %q, got %v", tc.wantErr, err)

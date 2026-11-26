@@ -1,15 +1,15 @@
 # hyperctl
 
-Interactive CLI that creates a HyperShift management cluster on AWS or Azure for Karpenter development, optionally with an AutoNode hosted cluster.
-On AWS the management cluster is OpenShift, installed with `openshift-install`; on Azure it is AKS.
+Interactive CLI that creates a HyperShift management cluster on AWS or Azure for Karpenter development, optionally with an AutoNode hosted cluster, or a cluster without HyperShift.
+On AWS the cluster is OpenShift, installed with `openshift-install`; on Azure it is AKS.
 hyperctl tracks the clusters it creates, so `status`, `kubeconfig` and `destroy` need no cluster names.
 
 ## Prerequisites
 
 - Go 1.27.1 or later
 - `oc`
-- `hypershift` built from [openshift/hypershift](https://github.com/openshift/hypershift) (`make build`), in `PATH` or configured via `hypershift` in the config file
-- A pull secret, by default at `~/.openshift/pull-secret-latest.json`
+- `hypershift` built from [openshift/hypershift](https://github.com/openshift/hypershift) (`make build`), in `PATH` or configured via `hypershift` in the config file, not needed for setup `standalone`
+- A pull secret, by default at `~/.openshift/pull-secret-latest.json`, not needed for an AKS cluster without HyperShift
 
 For AWS:
 
@@ -19,8 +19,8 @@ For AWS:
 
 For Azure:
 
-- The Azure CLI `az`, logged in with `az login` to the subscription to use, with permission to create applications and role assignments (e.g. Owner)
-- An Azure DNS zone for the base domain, by default `azure.autoscaling-dev.devcluster.openshift.com` in resource group `os4-common`
+- The Azure CLI `az`, logged in with `az login` to the subscription to use; for HyperShift with permission to create applications and role assignments (e.g. Owner)
+- For HyperShift, an Azure DNS zone for the base domain, by default `azure.autoscaling-dev.devcluster.openshift.com` in resource group `os4-common`
 
 ## Installation
 
@@ -57,7 +57,7 @@ hyperctl destroy
 
 | Command | Purpose |
 |---|---|
-| `hyperctl create` | Create the management cluster and optionally its hosted cluster, skipping clusters that are installed |
+| `hyperctl create` | Create a cluster, optionally with the HyperShift operator and an AutoNode hosted cluster, skipping clusters that are installed |
 | `hyperctl status` | Show the clusters, whether the management cluster responds and the hosted cluster is available |
 | `hyperctl kubeconfig [hosted\|mgmt]` | Print the kubeconfig paths of both clusters for `KUBECONFIG`, or of one |
 | `hyperctl destroy [all\|hosted]` | Destroy the hosted and, by default, the management cluster |
@@ -74,44 +74,47 @@ hyperctl destroy
 # Values from flags, create asks only for the others (--yes takes their defaults)
 hyperctl create --release 5.1.0-ec.0 --name "$USER-karpenter" --region eu-central-1
 
-# Management cluster and HyperShift operator only
-hyperctl create --management-only --release 5.1.0-ec.0 --name "$USER-karpenter" --region eu-central-1
+# Management cluster and HyperShift operator, no hosted cluster
+hyperctl create --setup management --release 5.1.0-ec.0 --name "$USER-karpenter" --region eu-central-1
 
 # On Azure
 hyperctl create --platform azure --release 5.1.0-ec.0
+
+# AKS cluster without HyperShift
+hyperctl create --platform azure --setup standalone
 ```
 
 In a terminal, `create` asks for every value not given as a flag, prefilled with the defaults, and asks to confirm a summary.
 With `--yes`, or without a terminal, it asks nothing: it takes the defaults and fails if a required value is missing.
 
 - **Platform:** an existing management cluster determines the platform and `create` reports it; otherwise `create` asks for it, or uses `--platform` (default `aws`).
-- **Setup:** a management cluster with an AutoNode hosted cluster, or the management cluster and HyperShift operator only (`--management-only`). `create` remembers the last choice.
-- **Release:** a version of an official release (`5.1.0-ec.0`) or a release image pull spec, e.g. of a nightly. Interactively, `create` lets you browse the [release controller](https://amd64.ocp.releases.ci.openshift.org/). `create` checks that the pull secret can pull the release image before creating anything; CI release images need a login to the CI registry, and `create` explains how to add it to the pull secret.
-- **Size:** the size prompt offers presets for the management cluster, see the platforms below. `--instance-type` and `--workers` skip it.
+- **Setup:** `--setup hosted` creates a management cluster with an AutoNode hosted cluster, `management` the management cluster and HyperShift operator, `standalone` only the cluster, without anything HyperShift needs. `create` remembers the last choice. Flags the setup doesn't use, like `--hosted-name` without a hosted cluster or `--release` for a standalone AKS cluster, are rejected.
+- **Release:** not needed for an AKS cluster without HyperShift. A version of an official release (`5.1.0-ec.0`) or a release image pull spec, e.g. of a nightly. Interactively, `create` lets you browse the [release controller](https://amd64.ocp.releases.ci.openshift.org/). `create` checks that the pull secret can pull the release image before creating anything; CI release images need a login to the CI registry, and `create` explains how to add it to the pull secret.
+- **Size:** the size prompt offers presets for the cluster, see the platforms below. `--instance-type` and `--workers` skip it.
 - **Names:** the management cluster is `$USER-karpenter` and the hosted cluster `<name>-workload` unless `--name` and `--hosted-name` say otherwise. The kubeconfig contexts are named after them.
 - **Region:** `--region` is the AWS region or the Azure location. It defaults to the config file, then the last used region of the platform, then the region of the AWS profile or `westus3`.
 
-hyperctl tracks one management cluster with one hosted cluster; to create others, destroy them first.
-Re-running `create` skips installed clusters and creates the missing ones.
+hyperctl tracks one cluster, with at most one hosted cluster; to create others, destroy them first.
+Re-running `create` skips installed clusters and creates the missing ones; with another setup it adds the HyperShift operator and the hosted cluster to an existing cluster. It installs the operator on every run, which updates it to the hypershift binary in use.
 An existing management cluster also determines the release, region, base domain and pull secret of its hosted cluster.
 A cluster whose creation did not complete has to be destroyed first; if only the hosted cluster failed, `hyperctl destroy hosted` keeps the management cluster.
 
 ### AWS
 
-1. Check the AWS account: IAM user credentials, EC2 Spot service-linked role, OIDC bucket (created and made public-readable if missing), DNS leftovers of previous clusters with the same names
+1. Check the AWS account: IAM user credentials, DNS leftovers of previous clusters with the same names, and for HyperShift the EC2 Spot service-linked role and the OIDC bucket (created and made public-readable if missing)
 2. Install the management cluster with `openshift-install` (about 45 minutes). The default is openshift-install's own: 3 control plane and 3 worker `m6i.xlarge` nodes across the zones of the region. The size prompt also offers compact clusters with 1 worker in one zone; `--workers=0` installs a compact cluster without a worker.
-3. Install the HyperShift operator with the standalone karpenter-operator, or with `--standalone-karpenter-operator=false` the one embedded in the HyperShift operator image
-4. Unless management-only, create the AutoNode hosted cluster and write its kubeconfig
+3. Unless setup `standalone`, install the HyperShift operator with the standalone karpenter-operator, or with `--standalone-karpenter-operator=false` the one embedded in the HyperShift operator image
+4. For setup `hosted`, create the AutoNode hosted cluster and write its kubeconfig
 
 Clusters whose instances were pruned leave Route53 records behind; `create` and `destroy` list the records of clusters with the same names and delete them after confirmation (or with `--yes`).
 
 ### Azure
 
 1. Check the Azure login (`az account show`) and that the location offers the node VM size without restrictions; see Region above for the default location
-2. Create or reuse the shared resources, see below
+2. Unless setup `standalone`, create or reuse the shared resources, see below
 3. Create an AKS cluster in 2 zones in resource group `<name>-rg` (about 10 minutes). The size prompt offers 3 nodes `Standard_D4s_v5` and the size from the config file.
-4. Install the Prometheus and Route CRDs and the HyperShift operator with External DNS and the standalone karpenter-operator, which Azure AutoNode requires
-5. Unless management-only, create the workload identities and infrastructure with hypershift and the hosted cluster with 2 workers
+4. Unless setup `standalone`, install the Prometheus and Route CRDs and the HyperShift operator with External DNS and the standalone karpenter-operator, which Azure AutoNode requires
+5. For setup `hosted`, create the workload identities and infrastructure with hypershift and the hosted cluster with 2 workers
 
 Shared resources, created when missing on every `create` and kept when destroying clusters:
 
@@ -155,7 +158,7 @@ The hosted kubeconfig becomes available while the hosted cluster is still instal
 
 ### Status
 
-`status` shows the tracked clusters, whether the management cluster responds, whether the hosted cluster is available and the image overrides.
+`status` shows the tracked clusters, whether the management cluster responds and has the HyperShift operator, whether the hosted cluster is available and the image overrides.
 It detects an unreachable management cluster, e.g. after its instances were pruned.
 
 ### Image overrides

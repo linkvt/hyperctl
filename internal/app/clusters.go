@@ -32,8 +32,18 @@ type clusterRecord struct {
 	// PullSecret is the pull secret path, needed to extract the installer
 	// again for destroying a management cluster.
 	PullSecret string `json:"pullSecret,omitempty"`
+	// HypershiftOperator reports whether a management cluster has the
+	// HyperShift operator, see hasOperator.
+	HypershiftOperator *bool `json:"hypershiftOperator,omitempty"`
 	// UpdatedAt is the time of the last change, set when saving the record.
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// hasOperator reports whether a management cluster has the HyperShift
+// operator. Records of earlier versions lack the field and have the
+// operator, as every earlier create installed it.
+func (r clusterRecord) hasOperator() bool {
+	return r.HypershiftOperator == nil || *r.HypershiftOperator
 }
 
 // azureRecord are the shared Azure resources a hosted cluster was created
@@ -96,7 +106,8 @@ func (s clusterStore) check(c clusterRef) (bool, error) {
 	}
 }
 
-// begin saves the record of a new cluster as installing. It requires what
+// begin saves the record of a new cluster as installing, a management
+// cluster without the HyperShift operator. It requires what
 // destroying the cluster needs: the pull secret of an OpenShift management
 // cluster, the infra ID of a hosted cluster and the shared resources of an
 // Azure hosted cluster.
@@ -117,6 +128,9 @@ func (s clusterStore) begin(c clusterRef, r clusterRecord) error {
 		return fmt.Errorf("%s already has a record", c)
 	}
 	r.Phase = phaseInstalling
+	if c.hosted == "" {
+		r.HypershiftOperator = new(false)
+	}
 	return s.save(c, r)
 }
 
@@ -130,6 +144,20 @@ func (s clusterStore) markInstalled(c clusterRef) error {
 		return fmt.Errorf("%s has no record", c)
 	}
 	record.Phase = phaseInstalled
+	return s.save(c, record)
+}
+
+// markOperatorInstalled records that the HyperShift operator is installed on
+// a management cluster.
+func (s clusterStore) markOperatorInstalled(c clusterRef) error {
+	record, found, err := s.load(c)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("%s has no record", c)
+	}
+	record.HypershiftOperator = new(true)
 	return s.save(c, record)
 }
 

@@ -23,7 +23,8 @@ type platform interface {
 	// newCreate starts a create run, reading the options of the platform from
 	// the flags and the config file. It fails for set flags that don't apply
 	// to the platform, before any prompt or cloud operation.
-	newCreate(cmd *cli.Command, st state, cfg config) (platformCreate, error)
+	// Each run skips the steps the setup does not need.
+	newCreate(cmd *cli.Command, st state, cfg config, setup setup) (platformCreate, error)
 	// destroyHosted destroys a hosted cluster with hs, which runs against its
 	// management cluster.
 	destroyHosted(ctx context.Context, p progress, hs Hypershift, yes bool, mgmt, hosted string) error
@@ -40,13 +41,17 @@ type platformCreate interface {
 	// defaultRegion and defaultBaseDomain are used unless given as flags.
 	defaultRegion() string
 	defaultBaseDomain() string
+	// needsRelease reports whether the cluster needs a release, a pull
+	// secret and a base domain.
+	needsRelease() bool
 	// regionPrompt is the title and description of the region prompt.
 	regionPrompt() (title, description string)
-	// promptSize asks for the size of the management cluster.
+	// promptSize asks for the size of the cluster that create installs first.
 	promptSize(ctx context.Context, cmd *cli.Command) error
 	// missing returns the flags of required platform options without value.
 	missing() []string
-	// describeSize describes the size of the management cluster.
+	// describeSize describes the size of the cluster that create installs
+	// first.
 	describeSize() string
 	// summary returns further lines of the confirmation summary.
 	summary() []string

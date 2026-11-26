@@ -42,11 +42,16 @@ func runStatus(ctx context.Context, cluster ClusterAPI, w io.Writer, p progress)
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(w, "Management cluster %s\n", st.MgmtCluster)
 	if !found {
+		_, _ = fmt.Fprintf(w, "%s %s\n", st.Setup.clusterTitle(), st.MgmtCluster)
 		field(w, "Phase", "not created")
 		return nil
 	}
+	title, operator := "Management cluster", "installed"
+	if !mgmt.hasOperator() {
+		title, operator = "Cluster", "not installed"
+	}
+	_, _ = fmt.Fprintf(w, "%s %s\n", title, st.MgmtCluster)
 	kubeconfig := clusters.kubeconfig(mgmtRef)
 	var ready bool
 	if mgmt.Phase == phaseInstalled {
@@ -57,8 +62,11 @@ func runStatus(ctx context.Context, cluster ClusterAPI, w io.Writer, p progress)
 	}
 	printPhase(w, mgmt, "hyperctl destroy")
 	field(w, "Platform", mgmt.Platform)
-	field(w, "Release", mgmt.Release)
+	if mgmt.Release != "" {
+		field(w, "Release", mgmt.Release)
+	}
 	field(w, "Region", mgmt.Region)
+	field(w, "HyperShift", operator)
 	switch {
 	case mgmt.Phase != phaseInstalled:
 		field(w, "Log", filepath.Join(clusters.installDir(mgmtRef), ".openshift_install.log"))

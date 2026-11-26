@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -96,26 +97,36 @@ type azurePlatform struct {
 // azureCreate is a create run on Azure.
 type azureCreate struct {
 	azurePlatform
-	st   state
-	cfg  config
-	size aksSize
+	st    state
+	cfg   config
+	setup setup
+	size  aksSize
 	// subscription, zones and shared are found by checkAccount and prepare.
 	subscription azureaccount.Subscription
 	zones        []string
 	shared       azureShared
 }
 
-func (a azurePlatform) newCreate(cmd *cli.Command, st state, cfg config) (platformCreate, error) {
+func (a azurePlatform) newCreate(cmd *cli.Command, st state, cfg config, setup setup) (platformCreate, error) {
 	if cmd.IsSet("oidc-bucket") {
 		return nil, errors.New("--oidc-bucket does not apply to azure, it uses the OIDC issuer of the shared Azure resources")
 	}
-	if !cmd.Bool("standalone-karpenter-operator") {
+	if !setup.operator() {
+		// AKS needs no release, pull secret or base domain.
+		for _, name := range []string{"release", "base-domain", "pull-secret"} {
+			if cmd.IsSet(name) {
+				return nil, fmt.Errorf("--%s does not apply to setup %s on azure", name, setup)
+			}
+		}
+	}
+	if setup.operator() && !cmd.Bool("standalone-karpenter-operator") {
 		return nil, errors.New("AutoNode on Azure requires the standalone karpenter-operator, remove --standalone-karpenter-operator=false")
 	}
 	run := &azureCreate{
 		azurePlatform: a,
 		st:            st,
 		cfg:           cfg,
+		setup:         setup,
 		size: aksSize{
 			VMSize: flagOr(cmd, "instance-type", cmp.Or(cfg.Azure.MgmtVMSize, defaultAzureVMSize)),
 			Nodes:  cmp.Or(cfg.Azure.MgmtNodes, defaultAKSNodes),
@@ -135,6 +146,13 @@ func (r *azureCreate) defaultBaseDomain() string {
 	return cmp.Or(r.cfg.Azure.BaseDomain, defaultAzureBaseDomain)
 }
 
+// needsRelease reports whether the HyperShift operator is installed, AKS
+// needs no release, the operator needs the pull secret and the shared
+// resources the base domain.
+func (r *azureCreate) needsRelease() bool {
+	return r.setup.operator()
+}
+
 func (r *azureCreate) regionPrompt() (string, string) {
 	return "Azure location", "e.g. " + defaultAzureLocation + ", germanywestcentral, eastus"
 }
@@ -143,7 +161,7 @@ func (r *azureCreate) promptSize(ctx context.Context, cmd *cli.Command) error {
 	if cmd.IsSet("instance-type") || cmd.IsSet("workers") {
 		return nil
 	}
-	return promptAKSSize(ctx, &r.size)
+	return promptAKSSize(ctx, r.setup.clusterTitle()+" size", &r.size)
 }
 
 func (r *azureCreate) missing() []string {
@@ -178,8 +196,9 @@ func (r *azureCreate) checkAccount(ctx context.Context, p progress) error {
 	return nil
 }
 
-// prepare checks that the location offers the VM size of the AKS nodes and
-// creates the shared Azure resources that are missing.
+// prepare checks that the location offers the VM size of the AKS nodes and,
+// for the HyperShift operator, creates the shared Azure resources that are
+// missing.
 func (r *azureCreate) prepare(ctx context.Context, p progress, opts createOptions) error {
 	p.step("Checking the Azure subscription")
 	var zones []string
@@ -193,6 +212,9 @@ func (r *azureCreate) prepare(ctx context.Context, p progress, opts createOption
 	}
 	r.zones = zones[:min(len(zones), aksZones)]
 	p.done("%s is available in %s (zones: %s)", r.size.VMSize, opts.Region, strings.Join(r.zones, ", "))
+	if !r.setup.operator() {
+		return nil
+	}
 
 	p.step("Shared Azure resources")
 	if r.shared, err = newAzureShared(r.dirs, r.cfg, r.subscription, opts.BaseDomain, opts.Region); err != nil {

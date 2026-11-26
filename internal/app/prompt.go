@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -18,20 +19,7 @@ import (
 // promptCreateOptions asks for every value not given as a flag, prefilled
 // with the current value, and for the SSH key if askSSHKey is set.
 func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, client releases.Client, run platformCreate, opts *createOptions, askSSHKey bool) error {
-	if !cmd.IsSet("management-only") {
-		if err := huh.NewForm(huh.NewGroup(
-			huh.NewSelect[bool]().
-				Title("Setup").
-				Options(
-					huh.NewOption("Management and hosted cluster with AutoNode", false),
-					huh.NewOption("Management cluster and HyperShift operator only", true),
-				).
-				Value(&opts.ManagementOnly),
-		)).RunWithContext(ctx); err != nil {
-			return err
-		}
-	}
-	if !cmd.IsSet("release") {
+	if run.needsRelease() && !cmd.IsSet("release") {
 		release, err := promptRelease(ctx, p, client, opts.Release)
 		if err != nil {
 			return err
@@ -46,13 +34,15 @@ func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, clie
 		title       string
 		description string
 		value       *string
+		// release marks the values only asked with needsRelease.
+		release bool
 	}{
-		{"region", regionTitle, regionDescription, &opts.Region},
-		{"base-domain", "Base domain", "", &opts.BaseDomain},
-		{"name", "Management cluster name", "", &opts.Name},
-		{"pull-secret", "Pull secret file", "", &opts.PullSecret},
+		{"region", regionTitle, regionDescription, &opts.Region, false},
+		{"base-domain", "Base domain", "", &opts.BaseDomain, true},
+		{"name", opts.Setup.clusterTitle() + " name", "", &opts.Name, false},
+		{"pull-secret", "Pull secret file", "", &opts.PullSecret, true},
 	} {
-		if cmd.IsSet(input.flag) {
+		if cmd.IsSet(input.flag) || (input.release && !run.needsRelease()) {
 			continue
 		}
 		field := huh.NewInput().Title(input.title).Value(input.value).Validate(requireValue)
@@ -61,7 +51,7 @@ func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, clie
 		}
 		fields = append(fields, field)
 	}
-	if !opts.ManagementOnly && !cmd.IsSet("hosted-name") {
+	if opts.Setup.hosted() && !cmd.IsSet("hosted-name") {
 		fields = append(fields, huh.NewInput().
 			Title("Hosted cluster name").
 			Placeholder("<management cluster name>-workload").
@@ -249,32 +239,43 @@ func filterBrowseTags(ctx context.Context, client releases.Client, stream string
 
 // confirmCreateOptions shows a summary and fails unless the user confirms.
 func confirmCreateOptions(ctx context.Context, platformName string, run platformCreate, opts createOptions) error {
-	sshKey := opts.SSHKey
-	if sshKey == "" {
-		sshKey = "none"
+	setup := map[setup]string{
+		setupStandalone: "Standalone cluster",
+		setupManagement: "Management cluster and HyperShift operator",
+		setupHosted:     "Management and hosted cluster",
+	}[opts.Setup]
+	lines := []string{
+		"Platform:       " + platformName,
+		"Setup:          " + setup,
 	}
-	setup := "Management and hosted cluster"
-	if opts.ManagementOnly {
-		setup = "Management cluster only"
+	if run.needsRelease() {
+		lines = append(lines, "Release:        "+opts.Release)
 	}
-	summary := fmt.Sprintf("Platform:       %s\nSetup:          %s\nRelease:        %s\nRegion:         %s\nBase domain:    %s\nMgmt cluster:   %s\nMgmt size:      %s",
-		platformName, setup, opts.Release, opts.Region, opts.BaseDomain, opts.Name, run.describeSize())
-	if !opts.ManagementOnly {
-		hostedName := opts.HostedName
-		if hostedName == "" {
-			hostedName = opts.Name + "-workload"
+	lines = append(lines, "Region:         "+opts.Region)
+	if run.needsRelease() {
+		lines = append(lines, "Base domain:    "+opts.BaseDomain)
+	}
+	clusterLabel, sizeLabel := "Mgmt cluster:   ", "Mgmt size:      "
+	if !opts.Setup.operator() {
+		clusterLabel, sizeLabel = "Cluster:        ", "Cluster size:   "
+	}
+	lines = append(lines, clusterLabel+opts.Name, sizeLabel+run.describeSize())
+	if opts.Setup.hosted() {
+		lines = append(lines, "Hosted cluster: "+cmp.Or(opts.HostedName, opts.Name+"-workload"))
+	}
+	if run.needsRelease() {
+		lines = append(lines, "Pull secret:    "+opts.PullSecret)
+	}
+	lines = append(lines, "SSH key:        "+cmp.Or(opts.SSHKey, "none"))
+	lines = append(lines, run.summary()...)
+	if opts.Setup.operator() {
+		karpenterOperator := "embedded"
+		if opts.StandaloneKarpenterOperator {
+			karpenterOperator = "standalone"
 		}
-		summary += fmt.Sprintf("\nHosted cluster: %s", hostedName)
+		lines = append(lines, "Karpenter op:   "+karpenterOperator)
 	}
-	summary += fmt.Sprintf("\nPull secret:    %s\nSSH key:        %s", opts.PullSecret, sshKey)
-	if lines := run.summary(); len(lines) > 0 {
-		summary += "\n" + strings.Join(lines, "\n")
-	}
-	karpenterOperator := "embedded"
-	if opts.StandaloneKarpenterOperator {
-		karpenterOperator = "standalone"
-	}
-	summary += fmt.Sprintf("\nKarpenter op:   %s", karpenterOperator)
+	summary := strings.Join(lines, "\n")
 	confirmed := true
 	err := huh.NewForm(huh.NewGroup(
 		huh.NewNote().Title("Summary").Description(summary),

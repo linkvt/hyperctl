@@ -147,7 +147,7 @@ func TestDestroySkipsManagementClusterThatWasNeverInstalled(t *testing.T) {
 		"--region", "eu-central-1",
 		"--name", "test-mgmt",
 		"--pull-secret", env.pullSecret,
-		"--management-only",
+		"--setup", "management",
 	)
 	// Create stopped between tracking the cluster and recording it.
 	clusterDir := filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt")
@@ -309,7 +309,7 @@ func TestDestroySharedWithYesRequiresPlatform(t *testing.T) {
 // resources while an AWS management cluster exists.
 func TestDestroySharedIgnoresClustersOfOtherPlatforms(t *testing.T) {
 	env := newTestEnv(t)
-	env.run(t, "create", "--management-only", "--release", "5.1.0-ec.0", "--region", "eu-central-1", "--name", "test-mgmt", "--pull-secret", env.pullSecret)
+	env.run(t, "create", "--setup", "management", "--release", "5.1.0-ec.0", "--region", "eu-central-1", "--name", "test-mgmt", "--pull-secret", env.pullSecret)
 
 	env.run(t, "destroy", "shared", "--platform", "azure", "--yes")
 
@@ -320,7 +320,7 @@ func TestDestroySharedIgnoresClustersOfOtherPlatforms(t *testing.T) {
 
 func TestDestroyRejectsPlatformForClusters(t *testing.T) {
 	env := newTestEnv(t)
-	env.run(t, "create", "--management-only", "--release", "5.1.0-ec.0", "--region", "eu-central-1", "--name", "test-mgmt", "--pull-secret", env.pullSecret)
+	env.run(t, "create", "--setup", "management", "--release", "5.1.0-ec.0", "--region", "eu-central-1", "--name", "test-mgmt", "--pull-secret", env.pullSecret)
 
 	_, err := env.runErr(t, "destroy", "--platform", "aws", "--yes")
 
