@@ -35,8 +35,7 @@ users:
 `
 )
 
-// fakeOC records its arguments and "extracts" the fake openshift-install
-// into the --to directory. For status checks, the API is down when
+// fakeOC records its arguments. For status checks, the API is down when
 // HYPERCTL_TEST_API_DOWN is set and the hosted cluster's Available condition
 // is HYPERCTL_TEST_HOSTED_AVAILABLE. HostedCluster annotations are kept as
 // files in $HYPERCTL_TEST_LOG/annotations. HYPERCTL_TEST_HOSTED_KUBECONFIG_SECRET
@@ -55,9 +54,6 @@ mkdir -p "$annotations"
 hcpAnnotations="$HYPERCTL_TEST_LOG/hcp-annotations"
 mkdir -p "$hcpAnnotations"
 case "$*" in
-  *"adm release info"*)
-    [ -z "$HYPERCTL_TEST_RELEASE_INFO_ERROR" ] || { printf '%s\n' "$HYPERCTL_TEST_RELEASE_INFO_ERROR" >&2; exit 1; }
-    exit 0 ;;
   *"get --raw /readyz"*) [ -z "$HYPERCTL_TEST_API_DOWN" ] || exit 1; echo ok; exit 0 ;;
   *"get hostedcontrolplane"*"-o json")
     printf '{"metadata":{"annotations":{'
@@ -129,47 +125,6 @@ case "$*" in
     done
     exit 0 ;;
 esac
-for a in "$@"; do
-  case "$a" in --to=*) to="${a#--to=}" ;; esac
-done
-mkdir -p "$to"
-cp "$HYPERCTL_TEST_FAKE_INSTALLER" "$to/openshift-install"
-chmod +x "$to/openshift-install"
-`
-
-// fakeInstaller records its arguments, relevant env vars and the consumed
-// install-config, then writes the files the real installer leaves behind.
-const fakeInstaller = `#!/bin/sh
-d="$HYPERCTL_TEST_LOG/openshift-install-$(ls "$HYPERCTL_TEST_LOG" | grep -c '^openshift-install-')"
-mkdir -p "$d"
-echo "$*" > "$d/args"
-[ "$1" = "destroy" ] && exit 0
-echo "level=info msg=fake install" >&2
-printf '%s' "$OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE" > "$d/release-override"
-printf '%s' "$OPENSHIFT_INSTALL_EXPERIMENTAL_DISABLE_IMAGE_POLICY" > "$d/disable-image-policy"
-dir="$4"
-mv "$dir/install-config.yaml" "$d/install-config.yaml"
-mkdir -p "$dir/auth"
-cat > "$dir/auth/kubeconfig" <<KUBECONFIG
-apiVersion: v1
-kind: Config
-clusters:
-- name: fake-mgmt
-  cluster:
-    server: https://api.mgmt.fake:6443
-contexts:
-- name: admin
-  context:
-    cluster: fake-mgmt
-    user: admin
-current-context: admin
-users:
-- name: admin
-  user:
-    token: mgmt-token
-KUBECONFIG
-echo '{}' > "$dir/metadata.json"
-[ -z "$HYPERCTL_TEST_INSTALLER_FAIL" ] || exit 1
 `
 
 // testEnv isolates a hyperctl run: temp HOME, fake binaries on PATH and a
@@ -181,6 +136,7 @@ type testEnv struct {
 	pullSecret    string
 	aws           *fakeAWS
 	hypershift    *fakeHypershift
+	images        *fakeReleaseImages
 	azure         *fakeAzure
 	defaultRegion string
 	releasesURL   string
@@ -196,17 +152,16 @@ func newTestEnv(t *testing.T) *testEnv {
 		aws:        &fakeAWS{callerARN: testIAMUserARN, publicBuckets: map[string]string{}, dns: map[string][]string{}},
 		azure:      newFakeAzure(),
 		hypershift: newFakeHypershift(),
+		images:     &fakeReleaseImages{},
 	}
 	binDir := filepath.Join(root, "bin")
 	e.binDir = binDir
-	fakeInstallerPath := filepath.Join(root, "fake-openshift-install")
 	for _, dir := range []string{e.home, e.logDir, binDir} {
 		mustMkdir(t, dir)
 	}
 	writeFile(t, filepath.Join(binDir, "oc"), fakeOC, 0o755)
 	mustMkdir(t, filepath.Join(e.home, ".aws"))
 	writeFile(t, filepath.Join(e.home, ".aws", "credentials"), "[default]\n", 0o600)
-	writeFile(t, fakeInstallerPath, fakeInstaller, 0o755)
 	writeFile(t, e.pullSecret, testPullSecret, 0o600)
 
 	t.Setenv("HOME", e.home)
@@ -217,7 +172,6 @@ func newTestEnv(t *testing.T) *testEnv {
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "")
 	t.Setenv("HYPERCTL_TEST_LOG", e.logDir)
-	t.Setenv("HYPERCTL_TEST_FAKE_INSTALLER", fakeInstallerPath)
 	return e
 }
 
@@ -239,6 +193,7 @@ func (e *testEnv) runErr(t *testing.T, args ...string) (string, error) {
 		Azure:         e.azure,
 		Hypershift:    e.hypershift.cli,
 		LookPath:      e.hypershift.lookPath,
+		ReleaseImages: e.images,
 		DefaultRegion: e.defaultRegion,
 		ReleasesURL:   e.releasesURL,
 		Stdout:        &out,

@@ -147,7 +147,7 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 		return err
 	}
 	p.step("Management cluster %s", opts.Name)
-	if err := ensureMgmtCluster(ctx, p, deps.AWS, dirs, opts); err != nil {
+	if err := ensureMgmtCluster(ctx, p, deps, dirs, opts); err != nil {
 		return err
 	}
 
@@ -305,7 +305,7 @@ func resolveCreateOptions(ctx context.Context, p progress, cmd *cli.Command, dep
 	if len(missing) > 0 {
 		return createOptions{}, fmt.Errorf("missing required values: %s", strings.Join(missing, ", "))
 	}
-	if err := checkReleasePullable(ctx, p, opts); err != nil {
+	if err := checkReleasePullable(ctx, p, deps.ReleaseImages, opts); err != nil {
 		return createOptions{}, err
 	}
 	return opts, nil
@@ -327,12 +327,12 @@ const (
 
 // checkReleasePullable fails if the release image cannot be read with the pull
 // secret, instead of failing when the image is first pulled.
-func checkReleasePullable(ctx context.Context, p progress, opts createOptions) error {
+func checkReleasePullable(ctx context.Context, p progress, images ReleaseImages, opts createOptions) error {
 	release := ocp.ParseRelease(opts.Release)
 	err := p.wait(ctx, "Checking access to "+release.PullSpec, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, pullCheckTimeout)
 		defer cancel()
-		return ocp.New().CheckPullable(ctx, release, opts.PullSecret)
+		return images.CheckPullable(ctx, release, opts.PullSecret)
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "unauthorized") {

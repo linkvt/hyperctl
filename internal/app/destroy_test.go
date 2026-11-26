@@ -33,7 +33,7 @@ func TestDestroyHostedDestroysOnlyHostedCluster(t *testing.T) {
 		t.Error("expected no hosted cluster after destroy")
 	}
 	env.run(t, "kubeconfig", "mgmt")
-	if got := env.installerDestroyCalls(t); len(got) != 0 {
+	if got := env.images.destroys; len(got) != 0 {
 		t.Errorf("expected no management cluster destroy, got %v", got)
 	}
 }
@@ -70,9 +70,9 @@ func TestDestroyDestroysHostedAndManagementCluster(t *testing.T) {
 	env.run(t, "destroy", "--yes")
 
 	single(t, env.hypershift.destroys)
-	calls := env.installerDestroyCalls(t)
-	if want := "destroy cluster --dir " + filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/install"); len(calls) != 1 || calls[0] != want {
-		t.Errorf("installer destroy calls: got %v, want [%s]", calls, want)
+	calls := env.images.destroys
+	if want := filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/install"); len(calls) != 1 || calls[0].installDir != want {
+		t.Errorf("installer destroy calls: got %+v, want install dir %s", calls, want)
 	}
 	if _, err := os.Stat(filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt")); !os.IsNotExist(err) {
 		t.Errorf("expected cluster data to be removed, stat error: %v", err)
@@ -91,14 +91,14 @@ func TestDestroyRequiresConfirmationWhenNotInteractive(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--yes") {
 		t.Errorf("expected confirmation error, got %v", err)
 	}
-	if got := len(env.installerDestroyCalls(t)); got != 0 {
+	if got := len(env.images.destroys); got != 0 {
 		t.Errorf("expected no destroy calls, got %d", got)
 	}
 }
 
 func TestDestroyDestroysIncompleteManagementCluster(t *testing.T) {
 	env := newTestEnv(t)
-	t.Setenv("HYPERCTL_TEST_INSTALLER_FAIL", "1")
+	env.images.installErr = errors.New("openshift-install create cluster: exit status 1")
 	if _, err := env.runErr(t, "create",
 		"--release", "5.1.0-ec.0",
 		"--region", "eu-central-1",
@@ -110,7 +110,7 @@ func TestDestroyDestroysIncompleteManagementCluster(t *testing.T) {
 
 	env.run(t, "destroy", "--yes")
 
-	if got := len(env.installerDestroyCalls(t)); got != 1 {
+	if got := len(env.images.destroys); got != 1 {
 		t.Errorf("expected 1 installer destroy call, got %d", got)
 	}
 }
@@ -133,7 +133,7 @@ func TestDestroySkipsHostedClusterThatWasNeverCreated(t *testing.T) {
 	if destroys := len(env.hypershift.destroys) + len(env.hypershift.infraDestroys); destroys != 0 {
 		t.Errorf("expected no hosted cluster destroy, got %d", destroys)
 	}
-	if got := len(env.installerDestroyCalls(t)); got != 1 {
+	if got := len(env.images.destroys); got != 1 {
 		t.Errorf("expected 1 installer destroy call, got %d", got)
 	}
 }
@@ -180,21 +180,4 @@ func (e *testEnv) hostedInfraID(t *testing.T) string {
 	}
 	t.Fatal("no hosted cluster created")
 	return ""
-}
-
-// installerDestroyCalls returns the arguments of recorded
-// "openshift-install destroy" invocations.
-func (e *testEnv) installerDestroyCalls(t *testing.T) []string {
-	t.Helper()
-	dirs, err := filepath.Glob(filepath.Join(e.logDir, "openshift-install-*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var calls []string
-	for _, dir := range dirs {
-		if args := readFile(t, filepath.Join(dir, "args")); strings.HasPrefix(args, "destroy ") {
-			calls = append(calls, args)
-		}
-	}
-	return calls
 }

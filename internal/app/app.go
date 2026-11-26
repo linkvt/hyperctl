@@ -8,6 +8,7 @@ import (
 
 	"github.com/linkvt/hyperctl/internal/azureaccount"
 	"github.com/linkvt/hyperctl/internal/hypershift"
+	"github.com/linkvt/hyperctl/internal/ocp"
 )
 
 // AWSAccount are the AWS account operations hyperctl uses.
@@ -103,6 +104,17 @@ type Hypershift interface {
 	CreateAzureCluster(ctx context.Context, params hypershift.CreateAzureClusterParams) error
 }
 
+// ReleaseImages are the operations on OCP release images and the
+// openshift-install binaries extracted from them that hyperctl uses, see the
+// ocp package.
+type ReleaseImages interface {
+	CheckPullable(ctx context.Context, release ocp.Release, pullSecretPath string) error
+	CachedInstaller(cacheDir string, release ocp.Release) (ocp.Installer, bool)
+	ExtractInstaller(ctx context.Context, cacheDir string, release ocp.Release, pullSecretPath string) (ocp.Installer, error)
+	CreateCluster(ctx context.Context, installer ocp.Installer, installDir string, release ocp.Release, out io.Writer) error
+	DestroyCluster(ctx context.Context, installer ocp.Installer, installDir string, out io.Writer) error
+}
+
 // Deps are the external dependencies of the hyperctl CLI.
 type Deps struct {
 	AWS   AWSAccount
@@ -111,7 +123,8 @@ type Deps struct {
 	// management cluster of kubeconfig and writing its output to out.
 	Hypershift func(path, kubeconfig string, out io.Writer) Hypershift
 	// LookPath finds a binary in PATH, see exec.LookPath.
-	LookPath func(file string) (string, error)
+	LookPath      func(file string) (string, error)
+	ReleaseImages ReleaseImages
 	// DefaultRegion is the region of the active AWS profile, if any.
 	DefaultRegion string
 	// ReleasesURL is the base URL of the release controller.

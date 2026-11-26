@@ -61,7 +61,7 @@ func TestStatus(t *testing.T) {
 
 func TestStatusShowsIncompleteInstallation(t *testing.T) {
 	env := newTestEnv(t)
-	t.Setenv("HYPERCTL_TEST_INSTALLER_FAIL", "1")
+	env.images.installErr = errors.New("openshift-install create cluster: exit status 1")
 	if _, err := env.runErr(t, "create",
 		"--release", "5.1.0-ec.0",
 		"--region", "eu-central-1",

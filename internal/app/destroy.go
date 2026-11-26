@@ -242,13 +242,13 @@ func destroyMgmtCluster(ctx context.Context, p progress, yes bool, deps Deps, di
 		p.done("Installation never started, nothing to destroy")
 		return os.RemoveAll(dir)
 	}
-	installer, err := ensureInstaller(ctx, p, dirs, ocp.ParseRelease(record.Release), record.PullSecret)
+	installer, err := ensureInstaller(ctx, p, deps.ReleaseImages, dirs, ocp.ParseRelease(record.Release), record.PullSecret)
 	if err != nil {
 		return err
 	}
 	p.info("Destroying")
 	start := time.Now()
-	if err := ocp.New().DestroyCluster(ctx, installer, installDir(dirs, name), p.tool("openshift-install")); err != nil {
+	if err := deps.ReleaseImages.DestroyCluster(ctx, installer, installDir(dirs, name), p.tool("openshift-install")); err != nil {
 		return err
 	}
 	p.done("Destroyed management cluster %s (%s)", name, since(start))

@@ -13,7 +13,7 @@ import (
 )
 
 // ensureMgmtCluster installs the management cluster unless it is installed.
-func ensureMgmtCluster(ctx context.Context, p progress, account AWSAccount, dirs xdg.Dirs, opts createOptions) error {
+func ensureMgmtCluster(ctx context.Context, p progress, deps Deps, dirs xdg.Dirs, opts createOptions) error {
 	record, found, err := loadClusterRecord(clusterDir(dirs, opts.Name))
 	if err != nil {
 		return err
@@ -25,12 +25,12 @@ func ensureMgmtCluster(ctx context.Context, p progress, account AWSAccount, dirs
 	case found:
 		return fmt.Errorf("previous installation of management cluster %s did not complete, destroy it first", opts.Name)
 	}
-	return installMgmtCluster(ctx, p, account, dirs, opts)
+	return installMgmtCluster(ctx, p, deps, dirs, opts)
 }
 
 // installMgmtCluster extracts the installer for the release and installs the
 // management cluster, tracking progress in the cluster record.
-func installMgmtCluster(ctx context.Context, p progress, account AWSAccount, dirs xdg.Dirs, opts createOptions) error {
+func installMgmtCluster(ctx context.Context, p progress, deps Deps, dirs xdg.Dirs, opts createOptions) error {
 	release := ocp.ParseRelease(opts.Release)
 
 	pullSecret, err := os.ReadFile(opts.PullSecret)
@@ -44,7 +44,7 @@ func installMgmtCluster(ctx context.Context, p progress, account AWSAccount, dir
 		}
 	}
 
-	installer, err := ensureInstaller(ctx, p, dirs, release, opts.PullSecret)
+	installer, err := ensureInstaller(ctx, p, deps.ReleaseImages, dirs, release, opts.PullSecret)
 	if err != nil {
 		return err
 	}
@@ -53,7 +53,7 @@ func installMgmtCluster(ctx context.Context, p progress, account AWSAccount, dir
 	if opts.Workers == 0 || opts.Workers == compactWorkerCount {
 		err := p.wait(ctx, "Choosing an availability zone", func(ctx context.Context) error {
 			var err error
-			zone, err = account.FirstZone(ctx, opts.Region)
+			zone, err = deps.AWS.FirstZone(ctx, opts.Region)
 			return err
 		})
 		if err != nil {
@@ -101,7 +101,7 @@ func installMgmtCluster(ctx context.Context, p progress, account AWSAccount, dir
 	}
 	p.info("Installing, this takes about 45 minutes (log: %s)", filepath.Join(installDir, ".openshift_install.log"))
 	start := time.Now()
-	if err := ocp.New().CreateCluster(ctx, installer, installDir, release, p.tool("openshift-install")); err != nil {
+	if err := deps.ReleaseImages.CreateCluster(ctx, installer, installDir, release, p.tool("openshift-install")); err != nil {
 		return err
 	}
 	record.Phase = phaseInstalled
@@ -114,9 +114,9 @@ func installMgmtCluster(ctx context.Context, p progress, account AWSAccount, dir
 
 // ensureInstaller returns the openshift-install binary for the release from
 // the cache, extracting it from the release image if needed.
-func ensureInstaller(ctx context.Context, p progress, dirs xdg.Dirs, release ocp.Release, pullSecret string) (ocp.Installer, error) {
+func ensureInstaller(ctx context.Context, p progress, images ReleaseImages, dirs xdg.Dirs, release ocp.Release, pullSecret string) (ocp.Installer, error) {
 	cacheDir := filepath.Join(dirs.Cache, "releases")
-	if installer, found := ocp.New().CachedInstaller(cacheDir, release); found {
+	if installer, found := images.CachedInstaller(cacheDir, release); found {
 		p.done("Using cached openshift-install %s", release.Name)
 		return installer, nil
 	}
@@ -124,7 +124,7 @@ func ensureInstaller(ctx context.Context, p progress, dirs xdg.Dirs, release ocp
 	start := time.Now()
 	err := p.wait(ctx, "Extracting openshift-install "+release.Name+" from "+release.PullSpec, func(ctx context.Context) error {
 		var err error
-		installer, err = ocp.New().ExtractInstaller(ctx, cacheDir, release, pullSecret)
+		installer, err = images.ExtractInstaller(ctx, cacheDir, release, pullSecret)
 		return err
 	})
 	if err != nil {

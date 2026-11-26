@@ -15,6 +15,7 @@ import (
 	"github.com/linkvt/hyperctl/internal/awsaccount"
 	"github.com/linkvt/hyperctl/internal/azureaccount"
 	"github.com/linkvt/hyperctl/internal/hypershift"
+	"github.com/linkvt/hyperctl/internal/ocp"
 	"github.com/linkvt/hyperctl/internal/releases"
 )
 
@@ -44,6 +45,7 @@ func run(ctx context.Context) error {
 			return hypershift.New(path, kubeconfig, out)
 		},
 		LookPath:      exec.LookPath,
+		ReleaseImages: ocp.New(),
 		DefaultRegion: awsConfig.Region,
 		ReleasesURL:   releases.DefaultURL,
 		Interactive:   term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())),
