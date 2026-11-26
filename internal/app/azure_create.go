@@ -8,6 +8,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/linkvt/hyperctl/internal/azureaccount"
 	"github.com/linkvt/hyperctl/internal/hypershift"
 	"github.com/linkvt/hyperctl/internal/oc"
 	"github.com/linkvt/hyperctl/internal/xdg"
@@ -34,7 +35,7 @@ var hypershiftCRDs = []string{
 // runCreateAzure creates an AKS management cluster and an Azure hosted
 // cluster, together with the Azure resources they share with later clusters.
 func runCreateAzure(ctx context.Context, p progress, cmd *cli.Command, deps Deps, dirs xdg.Dirs, st state, cfg config) error {
-	var subscription AzureSubscription
+	var subscription azureaccount.Subscription
 	err := p.wait(ctx, "Checking the Azure login", func(ctx context.Context) error {
 		var err error
 		subscription, err = deps.Azure.Subscription(ctx)

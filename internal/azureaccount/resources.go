@@ -12,8 +12,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/dns/armdns"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
-
-	"github.com/linkvt/hyperctl/internal/app"
 )
 
 const (
@@ -25,6 +23,26 @@ const (
 	// pollFrequency is how often long-running operations are polled.
 	pollFrequency = 15 * time.Second
 )
+
+// DNSRecord is a record set of an Azure DNS zone.
+type DNSRecord struct {
+	// Name is relative to the zone, "@" is the apex.
+	Name string
+	// Type is the record type, e.g. "A" or "NS".
+	Type     string
+	Metadata map[string]string
+}
+
+// AKSClusterParams configure an AKS management cluster.
+type AKSClusterParams struct {
+	ResourceGroup string
+	Name          string
+	Location      string
+	VMSize        string
+	Nodes         int
+	// Zones of the nodes, empty for a location without zones.
+	Zones []string
+}
 
 // EnsureOIDCIssuer creates a storage account with a publicly readable
 // container of the same name unless they exist, and uploads the documents.
@@ -154,12 +172,12 @@ func (a *Account) EnsureNSRecord(ctx context.Context, resourceGroup, zone, name 
 }
 
 // DNSRecords lists the record sets of a zone, none for a missing zone.
-func (a *Account) DNSRecords(ctx context.Context, resourceGroup, zone string) ([]app.AzureDNSRecord, error) {
+func (a *Account) DNSRecords(ctx context.Context, resourceGroup, zone string) ([]DNSRecord, error) {
 	client, err := a.recordSets()
 	if err != nil {
 		return nil, err
 	}
-	var records []app.AzureDNSRecord
+	var records []DNSRecord
 	pager := client.NewListAllByDNSZonePager(resourceGroup, zone, nil)
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
@@ -170,7 +188,7 @@ func (a *Account) DNSRecords(ctx context.Context, resourceGroup, zone string) ([
 			return nil, fmt.Errorf("listing records of %s: %w", zone, err)
 		}
 		for _, r := range page.Value {
-			record := app.AzureDNSRecord{
+			record := DNSRecord{
 				Name: deref(r.Name),
 				// The type is e.g. Microsoft.Network/dnszones/A.
 				Type:     deref(r.Type)[strings.LastIndex(deref(r.Type), "/")+1:],
@@ -188,7 +206,7 @@ func (a *Account) DNSRecords(ctx context.Context, resourceGroup, zone string) ([
 }
 
 // DeleteDNSRecord deletes a record set.
-func (a *Account) DeleteDNSRecord(ctx context.Context, resourceGroup, zone string, record app.AzureDNSRecord) error {
+func (a *Account) DeleteDNSRecord(ctx context.Context, resourceGroup, zone string, record DNSRecord) error {
 	client, err := a.recordSets()
 	if err != nil {
 		return err
@@ -210,7 +228,7 @@ func (a *Account) recordSets() (*armdns.RecordSetsClient, error) {
 
 // CreateAKSCluster creates an AKS cluster with Azure CNI and network policy
 // and waits until it is provisioned.
-func (a *Account) CreateAKSCluster(ctx context.Context, p app.AKSClusterParams) error {
+func (a *Account) CreateAKSCluster(ctx context.Context, p AKSClusterParams) error {
 	client, err := a.managedClusters()
 	if err != nil {
 		return err

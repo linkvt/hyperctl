@@ -11,7 +11,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/linkvt/hyperctl/internal/app"
+	"github.com/linkvt/hyperctl/internal/azureaccount"
 )
 
 const (
@@ -92,7 +92,7 @@ func TestCreateAzureCreatesSharedResources(t *testing.T) {
 	if !env.azure.dnsZones["tester-hyperctl/"+testAzureDNSZone] {
 		t.Errorf("expected DNS zone %s, got %v", testAzureDNSZone, env.azure.dnsZones)
 	}
-	delegation := slices.IndexFunc(env.azure.dnsRecords["os4-common/"+testAzureBaseDomain], func(r app.AzureDNSRecord) bool {
+	delegation := slices.IndexFunc(env.azure.dnsRecords["os4-common/"+testAzureBaseDomain], func(r azureaccount.DNSRecord) bool {
 		return r.Name == "tester-hyperctl" && r.Type == "NS"
 	})
 	if delegation < 0 {
@@ -105,7 +105,7 @@ func TestCreateAzureCreatesAKSManagementCluster(t *testing.T) {
 
 	env.createAzureClusters(t)
 
-	want := []app.AKSClusterParams{{
+	want := []azureaccount.AKSClusterParams{{
 		ResourceGroup: "test-mgmt-rg",
 		Name:          "test-mgmt",
 		Location:      testAzureLocation,
@@ -385,16 +385,16 @@ func TestDestroyAzureDestroysHostedAndManagementCluster(t *testing.T) {
 	env.createAzureClusters(t)
 	infraID := env.hostedInfraID(t)
 	baseZone := "os4-common/" + testAzureBaseDomain
-	env.azure.dnsRecords["tester-hyperctl/"+testAzureDNSZone] = []app.AzureDNSRecord{
+	env.azure.dnsRecords["tester-hyperctl/"+testAzureDNSZone] = []azureaccount.DNSRecord{
 		{Name: "@", Type: "NS"},
 		{Name: "@", Type: "SOA"},
 		{Name: "api-test-mgmt-workload", Type: "A"},
 		{Name: "a-api-test-mgmt-workload-external-dns", Type: "TXT"},
 	}
 	env.azure.dnsRecords[baseZone] = append(env.azure.dnsRecords[baseZone],
-		app.AzureDNSRecord{Name: "*.apps.test-mgmt-workload", Type: "A", Metadata: map[string]string{"kubernetes.io_cluster." + infraID: "owned"}},
-		app.AzureDNSRecord{Name: "*.apps.test-mgmt-workload", Type: "AAAA", Metadata: map[string]string{"kubernetes.io_cluster.other-infra": "owned"}},
-		app.AzureDNSRecord{Name: "*.apps.other", Type: "A", Metadata: map[string]string{"kubernetes.io_cluster." + infraID: "owned"}},
+		azureaccount.DNSRecord{Name: "*.apps.test-mgmt-workload", Type: "A", Metadata: map[string]string{"kubernetes.io_cluster." + infraID: "owned"}},
+		azureaccount.DNSRecord{Name: "*.apps.test-mgmt-workload", Type: "AAAA", Metadata: map[string]string{"kubernetes.io_cluster.other-infra": "owned"}},
+		azureaccount.DNSRecord{Name: "*.apps.other", Type: "A", Metadata: map[string]string{"kubernetes.io_cluster." + infraID: "owned"}},
 	)
 
 	env.run(t, "destroy", "--yes")
@@ -552,7 +552,7 @@ func readJSON(t *testing.T, path string, v any) {
 	}
 }
 
-func aksParamsEqual(a, b app.AKSClusterParams) bool {
+func aksParamsEqual(a, b azureaccount.AKSClusterParams) bool {
 	return a.ResourceGroup == b.ResourceGroup && a.Name == b.Name && a.Location == b.Location &&
 		a.VMSize == b.VMSize && a.Nodes == b.Nodes && slices.Equal(a.Zones, b.Zones)
 }

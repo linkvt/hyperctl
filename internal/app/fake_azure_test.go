@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/linkvt/hyperctl/internal/app"
+	"github.com/linkvt/hyperctl/internal/azureaccount"
 )
 
 const (
@@ -32,8 +32,8 @@ type fakeAzure struct {
 	oidcIssuers map[string]map[string][]byte
 	dnsZones    map[string]bool
 	// dnsRecords maps resourceGroup/zone to its records.
-	dnsRecords  map[string][]app.AzureDNSRecord
-	aksClusters []app.AKSClusterParams
+	dnsRecords  map[string][]azureaccount.DNSRecord
+	aksClusters []azureaccount.AKSClusterParams
 }
 
 type fakeRoleAssignment struct {
@@ -52,12 +52,12 @@ func newFakeAzure() *fakeAzure {
 		applications:   map[string]string{},
 		oidcIssuers:    map[string]map[string][]byte{},
 		dnsZones:       map[string]bool{},
-		dnsRecords:     map[string][]app.AzureDNSRecord{},
+		dnsRecords:     map[string][]azureaccount.DNSRecord{},
 	}
 }
 
-func (f *fakeAzure) Subscription(context.Context) (app.AzureSubscription, error) {
-	return app.AzureSubscription{ID: testSubscriptionID, Name: "Test Subscription", TenantID: testTenantID}, nil
+func (f *fakeAzure) Subscription(context.Context) (azureaccount.Subscription, error) {
+	return azureaccount.Subscription{ID: testSubscriptionID, Name: "Test Subscription", TenantID: testTenantID}, nil
 }
 
 func (f *fakeAzure) AvailableZones(_ context.Context, location, vmSize string) ([]string, error) {
@@ -84,11 +84,11 @@ func (f *fakeAzure) DeleteResourceGroups(_ context.Context, names ...string) err
 	return nil
 }
 
-func (f *fakeAzure) CreateServicePrincipal(_ context.Context, displayName string) (app.AzureServicePrincipal, error) {
+func (f *fakeAzure) CreateServicePrincipal(_ context.Context, displayName string) (azureaccount.ServicePrincipal, error) {
 	appID := "app-" + displayName
 	f.applications[appID] = displayName
 	f.secretsAdded++
-	return app.AzureServicePrincipal{AppID: appID, ObjectID: "object-" + displayName, ClientSecret: fmt.Sprintf("secret-%d", f.secretsAdded)}, nil
+	return azureaccount.ServicePrincipal{AppID: appID, ObjectID: "object-" + displayName, ClientSecret: fmt.Sprintf("secret-%d", f.secretsAdded)}, nil
 }
 
 func (f *fakeAzure) ServicePrincipalObjectID(_ context.Context, appID string) (string, bool, error) {
@@ -147,26 +147,26 @@ func (f *fakeAzure) EnsureDNSZone(_ context.Context, resourceGroup, zone string)
 
 func (f *fakeAzure) EnsureNSRecord(_ context.Context, resourceGroup, zone, name string, nameServers []string) error {
 	key := resourceGroup + "/" + zone
-	f.dnsRecords[key] = slices.DeleteFunc(f.dnsRecords[key], func(r app.AzureDNSRecord) bool {
+	f.dnsRecords[key] = slices.DeleteFunc(f.dnsRecords[key], func(r azureaccount.DNSRecord) bool {
 		return r.Name == name && r.Type == "NS"
 	})
-	f.dnsRecords[key] = append(f.dnsRecords[key], app.AzureDNSRecord{Name: name, Type: "NS", Metadata: map[string]string{"ns": fmt.Sprint(nameServers)}})
+	f.dnsRecords[key] = append(f.dnsRecords[key], azureaccount.DNSRecord{Name: name, Type: "NS", Metadata: map[string]string{"ns": fmt.Sprint(nameServers)}})
 	return nil
 }
 
-func (f *fakeAzure) DNSRecords(_ context.Context, resourceGroup, zone string) ([]app.AzureDNSRecord, error) {
+func (f *fakeAzure) DNSRecords(_ context.Context, resourceGroup, zone string) ([]azureaccount.DNSRecord, error) {
 	return slices.Clone(f.dnsRecords[resourceGroup+"/"+zone]), nil
 }
 
-func (f *fakeAzure) DeleteDNSRecord(_ context.Context, resourceGroup, zone string, record app.AzureDNSRecord) error {
+func (f *fakeAzure) DeleteDNSRecord(_ context.Context, resourceGroup, zone string, record azureaccount.DNSRecord) error {
 	key := resourceGroup + "/" + zone
-	f.dnsRecords[key] = slices.DeleteFunc(f.dnsRecords[key], func(r app.AzureDNSRecord) bool {
+	f.dnsRecords[key] = slices.DeleteFunc(f.dnsRecords[key], func(r azureaccount.DNSRecord) bool {
 		return r.Name == record.Name && r.Type == record.Type
 	})
 	return nil
 }
 
-func (f *fakeAzure) CreateAKSCluster(_ context.Context, params app.AKSClusterParams) error {
+func (f *fakeAzure) CreateAKSCluster(_ context.Context, params azureaccount.AKSClusterParams) error {
 	if _, found := f.resourceGroups[params.ResourceGroup]; !found {
 		return fmt.Errorf("resource group %s not found", params.ResourceGroup)
 	}

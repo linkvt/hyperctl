@@ -11,14 +11,19 @@ import (
 	"net/url"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
-
-	"github.com/linkvt/hyperctl/internal/app"
 )
 
 const graphURL = "https://graph.microsoft.com/v1.0"
 
 // errGraphNotFound is returned by graph for responses with status 404.
 var errGraphNotFound = errors.New("not found")
+
+// ServicePrincipal is a service principal with a new client secret.
+type ServicePrincipal struct {
+	AppID        string
+	ObjectID     string
+	ClientSecret string
+}
 
 type graphApplication struct {
 	ID    string `json:"id"`
@@ -32,33 +37,33 @@ type graphServicePrincipal struct {
 // CreateServicePrincipal returns the service principal of the application
 // with the display name, creating both if missing, and adds a new client
 // secret to the application.
-func (a *Account) CreateServicePrincipal(ctx context.Context, displayName string) (app.AzureServicePrincipal, error) {
+func (a *Account) CreateServicePrincipal(ctx context.Context, displayName string) (ServicePrincipal, error) {
 	var apps struct {
 		Value []graphApplication `json:"value"`
 	}
 	if err := a.graph(ctx, http.MethodGet, "/applications?"+filter("displayName eq '"+displayName+"'"), nil, &apps); err != nil {
-		return app.AzureServicePrincipal{}, fmt.Errorf("looking up application %s: %w", displayName, err)
+		return ServicePrincipal{}, fmt.Errorf("looking up application %s: %w", displayName, err)
 	}
 	var application graphApplication
 	switch len(apps.Value) {
 	case 0:
 		if err := a.graph(ctx, http.MethodPost, "/applications", map[string]string{"displayName": displayName}, &application); err != nil {
-			return app.AzureServicePrincipal{}, fmt.Errorf("creating application %s: %w", displayName, err)
+			return ServicePrincipal{}, fmt.Errorf("creating application %s: %w", displayName, err)
 		}
 	case 1:
 		application = apps.Value[0]
 	default:
-		return app.AzureServicePrincipal{}, fmt.Errorf("found %d applications named %s, delete all but one", len(apps.Value), displayName)
+		return ServicePrincipal{}, fmt.Errorf("found %d applications named %s, delete all but one", len(apps.Value), displayName)
 	}
 
 	objectID, found, err := a.ServicePrincipalObjectID(ctx, application.AppID)
 	if err != nil {
-		return app.AzureServicePrincipal{}, err
+		return ServicePrincipal{}, err
 	}
 	if !found {
 		var sp graphServicePrincipal
 		if err := a.graph(ctx, http.MethodPost, "/servicePrincipals", map[string]string{"appId": application.AppID}, &sp); err != nil {
-			return app.AzureServicePrincipal{}, fmt.Errorf("creating service principal of %s: %w", displayName, err)
+			return ServicePrincipal{}, fmt.Errorf("creating service principal of %s: %w", displayName, err)
 		}
 		objectID = sp.ID
 	}
@@ -68,9 +73,9 @@ func (a *Account) CreateServicePrincipal(ctx context.Context, displayName string
 	}
 	body := map[string]any{"passwordCredential": map[string]string{"displayName": "hyperctl"}}
 	if err := a.graph(ctx, http.MethodPost, "/applications/"+application.ID+"/addPassword", body, &password); err != nil {
-		return app.AzureServicePrincipal{}, fmt.Errorf("adding a client secret to %s: %w", displayName, err)
+		return ServicePrincipal{}, fmt.Errorf("adding a client secret to %s: %w", displayName, err)
 	}
-	return app.AzureServicePrincipal{AppID: application.AppID, ObjectID: objectID, ClientSecret: password.SecretText}, nil
+	return ServicePrincipal{AppID: application.AppID, ObjectID: objectID, ClientSecret: password.SecretText}, nil
 }
 
 // ServicePrincipalObjectID returns the object ID of the service principal of

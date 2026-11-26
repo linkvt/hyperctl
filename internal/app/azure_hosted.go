@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/linkvt/hyperctl/internal/azureaccount"
 	"github.com/linkvt/hyperctl/internal/hypershift"
 	"github.com/linkvt/hyperctl/internal/oc"
 	"github.com/linkvt/hyperctl/internal/ocp"
@@ -254,7 +255,7 @@ func destroyAzureHostedCluster(ctx context.Context, p progress, account AzureAcc
 		p.warn("Management cluster unreachable, deleting only the Azure resources of infra ID %s", record.InfraID)
 	}
 
-	var subscription AzureSubscription
+	var subscription azureaccount.Subscription
 	err = p.wait(ctx, "Deleting the Azure resources of infra ID "+record.InfraID, func(ctx context.Context) error {
 		var err error
 		if subscription, err = account.Subscription(ctx); err != nil {
