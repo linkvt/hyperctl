@@ -85,7 +85,8 @@ Set `--workers=0` to install a three-node compact management cluster without a w
 Releases are given as a version of an official release (`5.1.0-ec.0`) or as a release image pull spec, e.g. of a nightly.
 Interactively, `create` lets you browse the [release controller](https://amd64.ocp.releases.ci.openshift.org/).
 
-`image` sets the `hypershift.openshift.io/karpenter-operator-image` or `hypershift.openshift.io/karpenter-provider-aws-image` annotation of the hosted cluster, which rolls out the deployment.
+`image karpenter-operator` sets the `hypershift.openshift.io/karpenter-operator-image` annotation of the hosted cluster, `image karpenter-provider` sets the `autoscaling.openshift.io/karpenter-image` annotation of its HostedControlPlane, which the standalone karpenter-operator reads on both clouds. Either rolls out the deployment.
+Both have no effect with `--standalone-karpenter-operator=false`.
 Setting an unchanged image restarts the pods instead; hypershift only pulls `:latest` images again, other tags may be served from the node's image cache.
 
 Instances of stopped clusters get pruned, which leaves broken clusters and Route53 records behind.
@@ -120,7 +121,7 @@ The service principal credentials and the signing key are kept in `~/.local/shar
 
 `destroy` deletes the HostedCluster, the External DNS records, the `*.apps` record of the hosted cluster in the base domain zone (only if owned by its infra ID), the role assignment of the ingress identity on that zone, the resource groups and workload identities of the hosted cluster and the resource group of the AKS cluster.
 
-`hyperctl image karpenter-provider` only works on AWS, hypershift has no Karpenter provider image override for Azure.
+On Azure `hyperctl image karpenter-operator` follows `hypershift.openshift.io/karpenter-operator-image`, and `hyperctl image karpenter-provider` overrides the Azure provider that the standalone karpenter-operator deploys.
 
 ## Files
 

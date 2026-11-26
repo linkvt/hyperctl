@@ -33,38 +33,35 @@ func HostedClusterAvailable(ctx context.Context, kubeconfig, name string) (strin
 	return strings.TrimSpace(string(out)), nil
 }
 
-// HostedClusterAnnotations returns the annotations of a HostedCluster in the
-// clusters namespace.
-func HostedClusterAnnotations(ctx context.Context, kubeconfig, name string) (map[string]string, error) {
-	out, err := run(ctx, kubeconfig, "get", "hostedcluster", name, "-n", "clusters", "--request-timeout=10s", "-o", "json")
+// Annotations returns the annotations of a namespaced object.
+func Annotations(ctx context.Context, kubeconfig, kind, namespace, name string) (map[string]string, error) {
+	out, err := run(ctx, kubeconfig, "get", kind, name, "-n", namespace, "--request-timeout=10s", "-o", "json")
 	if err != nil {
-		return nil, fmt.Errorf("getting hosted cluster %s: %w", name, err)
+		return nil, fmt.Errorf("getting %s %s: %w", kind, name, err)
 	}
-	var hostedCluster struct {
+	var object struct {
 		Metadata struct {
 			Annotations map[string]string `json:"annotations"`
 		} `json:"metadata"`
 	}
-	if err := json.Unmarshal(out, &hostedCluster); err != nil {
-		return nil, fmt.Errorf("parsing hosted cluster %s: %w", name, err)
+	if err := json.Unmarshal(out, &object); err != nil {
+		return nil, fmt.Errorf("parsing %s %s: %w", kind, name, err)
 	}
-	return hostedCluster.Metadata.Annotations, nil
+	return object.Metadata.Annotations, nil
 }
 
-// AnnotateHostedCluster sets an annotation of a HostedCluster in the clusters
-// namespace.
-func AnnotateHostedCluster(ctx context.Context, kubeconfig, name, key, value string) error {
-	if _, err := run(ctx, kubeconfig, "annotate", "hostedcluster", name, "-n", "clusters", "--overwrite", key+"="+value); err != nil {
-		return fmt.Errorf("annotating hosted cluster %s: %w", name, err)
+// Annotate sets an annotation of a namespaced object.
+func Annotate(ctx context.Context, kubeconfig, kind, namespace, name, key, value string) error {
+	if _, err := run(ctx, kubeconfig, "annotate", kind, name, "-n", namespace, "--overwrite", key+"="+value); err != nil {
+		return fmt.Errorf("annotating %s %s: %w", kind, name, err)
 	}
 	return nil
 }
 
-// RemoveHostedClusterAnnotation removes an annotation of a HostedCluster in
-// the clusters namespace.
-func RemoveHostedClusterAnnotation(ctx context.Context, kubeconfig, name, key string) error {
-	if _, err := run(ctx, kubeconfig, "annotate", "hostedcluster", name, "-n", "clusters", key+"-"); err != nil {
-		return fmt.Errorf("removing annotation of hosted cluster %s: %w", name, err)
+// RemoveAnnotation removes an annotation of a namespaced object.
+func RemoveAnnotation(ctx context.Context, kubeconfig, kind, namespace, name, key string) error {
+	if _, err := run(ctx, kubeconfig, "annotate", kind, name, "-n", namespace, key+"-"); err != nil {
+		return fmt.Errorf("removing annotation of %s %s: %w", kind, name, err)
 	}
 	return nil
 }

@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/urfave/cli/v3"
@@ -13,31 +12,34 @@ import (
 )
 
 // imageComponent is a hosted control plane component whose image can be
-// overridden with a HostedCluster annotation.
+// overridden with an annotation.
 type imageComponent struct {
-	name       string
-	title      string
+	name  string
+	title string
+	// kind is the object that carries the annotation, the HostedCluster or
+	// its HostedControlPlane.
+	kind       string
 	annotation string
 	// selector matches the component's pods in the control plane namespace.
 	selector string
-	// awsOnly is set for components whose annotation hypershift only
-	// supports on AWS.
-	awsOnly bool
 }
 
 var imageComponents = []imageComponent{
 	{
 		name:       "karpenter-operator",
 		title:      "Karpenter operator",
+		kind:       "hostedcluster",
 		annotation: "hypershift.openshift.io/karpenter-operator-image",
 		selector:   "app=karpenter-operator",
 	},
 	{
-		name:       "karpenter-provider",
-		title:      "Karpenter provider",
-		annotation: "hypershift.openshift.io/karpenter-provider-aws-image",
+		name:  "karpenter-provider",
+		title: "Karpenter provider",
+		// The standalone karpenter-operator deploys the provider on both
+		// clouds and reads the image from the HostedControlPlane it runs for.
+		kind:       "hostedcontrolplane",
+		annotation: "autoscaling.openshift.io/karpenter-image",
 		selector:   "app=karpenter",
-		awsOnly:    true,
 	},
 }
 
@@ -81,15 +83,9 @@ func runImage(ctx context.Context, cmd *cli.Command, component imageComponent) e
 	if st.HostedCluster == "" {
 		return errors.New("no hosted cluster, run hyperctl create")
 	}
-	platform, err := trackedPlatform(dirs, st)
-	if err != nil {
-		return err
-	}
-	if component.awsOnly && platform != platformAWS {
-		return fmt.Errorf("hypershift supports overriding the %s image only on AWS", component.title)
-	}
 	kubeconfig := mgmtKubeconfigPath(dirs, st.MgmtCluster)
-	annotations, err := oc.HostedClusterAnnotations(ctx, kubeconfig, st.HostedCluster)
+	namespace := component.namespace(st.HostedCluster)
+	annotations, err := oc.Annotations(ctx, kubeconfig, component.kind, namespace, st.HostedCluster)
 	if err != nil {
 		return err
 	}
@@ -100,12 +96,12 @@ func runImage(ctx context.Context, cmd *cli.Command, component imageComponent) e
 	case reset && !set:
 		p.done("No %s image override set", component.title)
 	case reset:
-		if err := oc.RemoveHostedClusterAnnotation(ctx, kubeconfig, st.HostedCluster, component.annotation); err != nil {
+		if err := oc.RemoveAnnotation(ctx, kubeconfig, component.kind, namespace, st.HostedCluster, component.annotation); err != nil {
 			return err
 		}
 		p.done("Removed the %s image override, the deployment rolls out with the release image", component.title)
 	case current != image:
-		if err := oc.AnnotateHostedCluster(ctx, kubeconfig, st.HostedCluster, component.annotation, image); err != nil {
+		if err := oc.Annotate(ctx, kubeconfig, component.kind, namespace, st.HostedCluster, component.annotation, image); err != nil {
 			return err
 		}
 		p.done("Set the %s image to %s, the deployment rolls out", component.title, image)
@@ -113,6 +109,14 @@ func runImage(ctx context.Context, cmd *cli.Command, component imageComponent) e
 		return restartPods(ctx, p, kubeconfig, st.HostedCluster, component, image)
 	}
 	return nil
+}
+
+// namespace returns the namespace of the object that carries the override.
+func (c imageComponent) namespace(hosted string) string {
+	if c.kind == "hostedcontrolplane" {
+		return controlPlaneNamespace(hosted)
+	}
+	return "clusters"
 }
 
 // restartPods deletes the component's pods, so that they pull the unchanged
