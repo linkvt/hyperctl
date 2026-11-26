@@ -1,4 +1,4 @@
-.PHONY: test lint lint-fix fmt verify
+.PHONY: test lint lint-fix fmt verify verify-ci
 
 test:
 	go test ./...
@@ -16,3 +16,9 @@ verify:
 	$(MAKE) fmt
 	$(MAKE) test
 	$(MAKE) lint
+
+verify-ci:
+	golangci-lint fmt --diff ./...
+	go mod tidy -diff
+	go test -race ./...
+	golangci-lint run ./...
