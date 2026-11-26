@@ -101,7 +101,7 @@ func installMgmtCluster(ctx context.Context, p progress, account AWSAccount, dir
 	}
 	p.info("Installing, this takes about 45 minutes (log: %s)", filepath.Join(installDir, ".openshift_install.log"))
 	start := time.Now()
-	if err := installer.CreateCluster(ctx, installDir, release, p.tool("openshift-install")); err != nil {
+	if err := ocp.New().CreateCluster(ctx, installer, installDir, release, p.tool("openshift-install")); err != nil {
 		return err
 	}
 	record.Phase = phaseInstalled
@@ -116,7 +116,7 @@ func installMgmtCluster(ctx context.Context, p progress, account AWSAccount, dir
 // the cache, extracting it from the release image if needed.
 func ensureInstaller(ctx context.Context, p progress, dirs xdg.Dirs, release ocp.Release, pullSecret string) (ocp.Installer, error) {
 	cacheDir := filepath.Join(dirs.Cache, "releases")
-	if installer, found := ocp.CachedInstaller(cacheDir, release); found {
+	if installer, found := ocp.New().CachedInstaller(cacheDir, release); found {
 		p.done("Using cached openshift-install %s", release.Name)
 		return installer, nil
 	}
@@ -124,7 +124,7 @@ func ensureInstaller(ctx context.Context, p progress, dirs xdg.Dirs, release ocp
 	start := time.Now()
 	err := p.wait(ctx, "Extracting openshift-install "+release.Name+" from "+release.PullSpec, func(ctx context.Context) error {
 		var err error
-		installer, err = ocp.ExtractInstaller(ctx, cacheDir, release, pullSecret)
+		installer, err = ocp.New().ExtractInstaller(ctx, cacheDir, release, pullSecret)
 		return err
 	})
 	if err != nil {

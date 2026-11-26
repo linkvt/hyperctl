@@ -240,12 +240,12 @@ func destroyAzureHostedCluster(ctx context.Context, p progress, account AzureAcc
 	kubeconfig := mgmtKubeconfigPath(dirs, mgmt)
 	var ready bool
 	_ = p.wait(ctx, "Checking the management cluster API", func(ctx context.Context) error {
-		ready = oc.Ready(ctx, kubeconfig)
+		ready = oc.New().Ready(ctx, kubeconfig)
 		return nil
 	})
 	if ready {
 		err := p.wait(ctx, "Deleting the HostedCluster, this takes about 5 minutes", func(ctx context.Context) error {
-			return oc.DeleteHostedCluster(ctx, kubeconfig, hosted, controlPlaneNamespace(hosted))
+			return oc.New().DeleteHostedCluster(ctx, kubeconfig, hosted, controlPlaneNamespace(hosted))
 		})
 		if err != nil {
 			return err

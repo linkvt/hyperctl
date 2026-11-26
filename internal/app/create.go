@@ -332,7 +332,7 @@ func checkReleasePullable(ctx context.Context, p progress, opts createOptions) e
 	err := p.wait(ctx, "Checking access to "+release.PullSpec, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, pullCheckTimeout)
 		defer cancel()
-		return ocp.CheckPullable(ctx, release, opts.PullSecret)
+		return ocp.New().CheckPullable(ctx, release, opts.PullSecret)
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "unauthorized") {

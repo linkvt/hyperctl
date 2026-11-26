@@ -50,7 +50,7 @@ func runStatus(ctx context.Context, w io.Writer, p progress) error {
 	var ready bool
 	if mgmt.Phase == phaseInstalled {
 		_ = p.wait(ctx, "Checking the management cluster API", func(ctx context.Context) error {
-			ready = oc.Ready(ctx, kubeconfig)
+			ready = oc.New().Ready(ctx, kubeconfig)
 			return nil
 		})
 	}
@@ -84,7 +84,7 @@ func runStatus(ctx context.Context, w io.Writer, p progress) error {
 	overrides := map[string]string{}
 	if ready {
 		_ = p.wait(ctx, "Checking the hosted cluster", func(ctx context.Context) error {
-			status, err := oc.HostedClusterAvailable(ctx, kubeconfig, st.HostedCluster)
+			status, err := oc.New().HostedClusterAvailable(ctx, kubeconfig, st.HostedCluster)
 			if err != nil {
 				available = "unknown (" + err.Error() + ")"
 				return nil
@@ -108,7 +108,7 @@ func runStatus(ctx context.Context, w io.Writer, p progress) error {
 func imageOverrides(ctx context.Context, kubeconfig, hosted string) map[string]string {
 	overrides := map[string]string{}
 	for _, component := range imageComponents {
-		annotations, err := oc.Annotations(ctx, kubeconfig, component.kind, component.namespace(hosted), hosted)
+		annotations, err := oc.New().Annotations(ctx, kubeconfig, component.kind, component.namespace(hosted), hosted)
 		if err != nil {
 			continue
 		}

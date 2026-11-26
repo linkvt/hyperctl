@@ -136,7 +136,7 @@ func runCreateAzure(ctx context.Context, p progress, cmd *cli.Command, deps Deps
 func installAzureOperator(ctx context.Context, p progress, hs hypershift.CLI, kubeconfig string, opts createOptions, shared azureShared) error {
 	err := p.wait(ctx, "Applying the Prometheus and Route CRDs", func(ctx context.Context) error {
 		for _, url := range hypershiftCRDs {
-			if err := oc.ApplyServerSide(ctx, kubeconfig, url); err != nil {
+			if err := oc.New().ApplyServerSide(ctx, kubeconfig, url); err != nil {
 				return err
 			}
 		}

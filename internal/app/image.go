@@ -85,7 +85,7 @@ func runImage(ctx context.Context, cmd *cli.Command, component imageComponent) e
 	}
 	kubeconfig := mgmtKubeconfigPath(dirs, st.MgmtCluster)
 	namespace := component.namespace(st.HostedCluster)
-	annotations, err := oc.Annotations(ctx, kubeconfig, component.kind, namespace, st.HostedCluster)
+	annotations, err := oc.New().Annotations(ctx, kubeconfig, component.kind, namespace, st.HostedCluster)
 	if err != nil {
 		return err
 	}
@@ -96,12 +96,12 @@ func runImage(ctx context.Context, cmd *cli.Command, component imageComponent) e
 	case reset && !set:
 		p.done("No %s image override set", component.title)
 	case reset:
-		if err := oc.RemoveAnnotation(ctx, kubeconfig, component.kind, namespace, st.HostedCluster, component.annotation); err != nil {
+		if err := oc.New().RemoveAnnotation(ctx, kubeconfig, component.kind, namespace, st.HostedCluster, component.annotation); err != nil {
 			return err
 		}
 		p.done("Removed the %s image override, the deployment rolls out with the release image", component.title)
 	case current != image:
-		if err := oc.Annotate(ctx, kubeconfig, component.kind, namespace, st.HostedCluster, component.annotation, image); err != nil {
+		if err := oc.New().Annotate(ctx, kubeconfig, component.kind, namespace, st.HostedCluster, component.annotation, image); err != nil {
 			return err
 		}
 		p.done("Set the %s image to %s, the deployment rolls out", component.title, image)
@@ -123,7 +123,7 @@ func (c imageComponent) namespace(hosted string) string {
 // unchanged image again. Nodes may serve it from their image cache, only a
 // unique tag reliably rolls out a rebuilt image.
 func restartPods(ctx context.Context, p progress, kubeconfig, hosted string, component imageComponent) error {
-	if err := oc.DeletePods(ctx, kubeconfig, controlPlaneNamespace(hosted), component.selector); err != nil {
+	if err := oc.New().DeletePods(ctx, kubeconfig, controlPlaneNamespace(hosted), component.selector); err != nil {
 		return err
 	}
 	p.done("The %s image is unchanged, restarted its pods", component.title)

@@ -207,7 +207,7 @@ func destroyHostedCluster(ctx context.Context, p progress, yes bool, deps Deps, 
 	}
 	var ready bool
 	_ = p.wait(ctx, "Checking the management cluster API", func(ctx context.Context) error {
-		ready = oc.Ready(ctx, mgmtKubeconfigPath(dirs, mgmt))
+		ready = oc.New().Ready(ctx, mgmtKubeconfigPath(dirs, mgmt))
 		return nil
 	})
 	start := time.Now()
@@ -248,7 +248,7 @@ func destroyMgmtCluster(ctx context.Context, p progress, yes bool, deps Deps, di
 	}
 	p.info("Destroying")
 	start := time.Now()
-	if err := installer.DestroyCluster(ctx, installDir(dirs, name), p.tool("openshift-install")); err != nil {
+	if err := ocp.New().DestroyCluster(ctx, installer, installDir(dirs, name), p.tool("openshift-install")); err != nil {
 		return err
 	}
 	p.done("Destroyed management cluster %s (%s)", name, since(start))

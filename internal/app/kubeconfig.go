@@ -67,7 +67,7 @@ func selectKubeconfigs(ctx context.Context, dirs xdg.Dirs, s state, cluster stri
 		}
 		hostedExists = err == nil
 		if !hostedExists {
-			content, err := oc.HostedKubeconfig(ctx, mgmt.path, s.HostedCluster)
+			content, err := oc.New().HostedKubeconfig(ctx, mgmt.path, s.HostedCluster)
 			if err != nil {
 				return nil, err
 			}
