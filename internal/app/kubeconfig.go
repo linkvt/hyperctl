@@ -25,7 +25,7 @@ func kubeconfigCommand(deps Deps) *cli.Command {
 			}
 			c, required := sel.cluster.clusterRef, true
 			if !c.isHosted() {
-				switch hosted := sel.clusters.hosted(c.mgmt); len(hosted) {
+				switch hosted := sel.hostedClusters(); len(hosted) {
 				case 0:
 				case 1:
 					c, required = hosted[0].clusterRef, false

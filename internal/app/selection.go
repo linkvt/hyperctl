@@ -73,10 +73,7 @@ func unknownClusterError(name string, clusters clusterList) error {
 // hosted returns the selected hosted cluster or the only hosted cluster of
 // the selected management cluster.
 func (s selection) hosted() (storedCluster, error) {
-	if s.cluster.isHosted() {
-		return s.cluster, nil
-	}
-	hosted := s.clusters.hosted(s.cluster.mgmt)
+	hosted := s.hostedClusters()
 	switch len(hosted) {
 	case 0:
 		return storedCluster{}, fmt.Errorf("no hosted cluster on cluster %s, create one with: hyperctl create --name %s --setup hosted", s.cluster.mgmt, s.cluster.mgmt)
@@ -85,6 +82,15 @@ func (s selection) hosted() (storedCluster, error) {
 	default:
 		return storedCluster{}, fmt.Errorf("management cluster %s has several hosted clusters, select one with --cluster: %s", s.cluster.mgmt, strings.Join(hosted.names(), ", "))
 	}
+}
+
+// hostedClusters returns the selected hosted cluster or the hosted clusters
+// of the selected management cluster.
+func (s selection) hostedClusters() clusterList {
+	if s.cluster.isHosted() {
+		return clusterList{s.cluster}
+	}
+	return s.clusters.hosted(s.cluster.mgmt)
 }
 
 // management returns the management cluster of the selected cluster, or
