@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/huh"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
 
 	"github.com/linkvt/hyperctl/internal/tui"
 )
@@ -35,9 +35,26 @@ func TestSelectKeepsFilterWhileTyping(t *testing.T) {
 	}
 }
 
+func TestSelectFiltersPastedText(t *testing.T) {
+	s := newScrolledSelect()
+
+	s.typeText("/")
+	s.send(tea.PasteMsg{Content: "5.1"})
+
+	view := s.model.View()
+	for _, want := range []string{"5.1.0-0.ci", "5.1.0-0.nightly"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("expected %q in view:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "4.30.0-0.nightly") {
+		t.Errorf("expected only matches of 5.1 in view:\n%s", view)
+	}
+}
+
 // scrolledSelect is a focused select field scrolled down by 20 options.
 type scrolledSelect struct {
-	model tea.Model
+	model huh.Model
 }
 
 func newScrolledSelect() *scrolledSelect {
@@ -53,20 +70,20 @@ func newScrolledSelect() *scrolledSelect {
 
 	s := &scrolledSelect{model: field}
 	for range 20 {
-		s.send(tea.KeyMsg{Type: tea.KeyDown})
+		s.send(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	return s
 }
 
 func (s *scrolledSelect) typeText(text string) {
 	for _, r := range text {
-		s.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		s.send(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 }
 
 // send updates the field and renders it like bubbletea does, huh updates the
 // viewport content while rendering.
-func (s *scrolledSelect) send(msg tea.KeyMsg) {
+func (s *scrolledSelect) send(msg tea.Msg) {
 	s.model, _ = s.model.Update(msg)
 	s.model.View()
 }

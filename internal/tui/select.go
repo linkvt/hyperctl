@@ -2,8 +2,8 @@
 package tui
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/huh"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
 )
 
 // Select returns the select field with the scroll position reset whenever
@@ -19,10 +19,14 @@ type filterSelect struct {
 
 // Update returns the wrapper, as huh groups replace a field with the model
 // returned by its Update.
-func (s *filterSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (s *filterSelect) Update(msg tea.Msg) (huh.Model, tea.Cmd) {
 	wasFiltering := s.GetFiltering()
 	_, cmd := s.Select.Update(msg)
-	if keyMsg, ok := msg.(tea.KeyMsg); ok && wasFiltering && s.GetFiltering() && editsFilter(keyMsg) {
+	if _, ok := msg.(tea.PasteMsg); ok && s.GetFiltering() {
+		// huh applies the filter only when it handles a key press.
+		s.Select.Update(tea.KeyPressMsg{})
+	}
+	if wasFiltering && s.GetFiltering() && editsFilter(msg) {
 		s.scrollToTop()
 	}
 	return s, cmd
@@ -36,19 +40,21 @@ func (s *filterSelect) scrollToTop() {
 		// Leaving the filter input without matches clears the filter.
 		return
 	}
-	for _, msg := range []tea.KeyMsg{
-		{Type: tea.KeyEsc},
-		{Type: tea.KeyHome},
-		{Type: tea.KeyRunes, Runes: []rune("/")},
+	for _, msg := range []tea.KeyPressMsg{
+		{Code: tea.KeyEscape},
+		{Code: tea.KeyHome},
+		{Code: '/', Text: "/"},
 	} {
 		s.Select.Update(msg)
 	}
 }
 
-func editsFilter(msg tea.KeyMsg) bool {
-	switch msg.Type {
-	case tea.KeyRunes, tea.KeySpace, tea.KeyBackspace, tea.KeyDelete:
+func editsFilter(msg tea.Msg) bool {
+	switch msg := msg.(type) {
+	case tea.PasteMsg:
 		return true
+	case tea.KeyPressMsg:
+		return msg.Text != "" || msg.Code == tea.KeyBackspace || msg.Code == tea.KeyDelete
 	default:
 		return false
 	}
