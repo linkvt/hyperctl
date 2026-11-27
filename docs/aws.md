@@ -18,4 +18,4 @@ The size prompt offers the standard OpenShift cluster (3 control plane and 3 wor
 
 With HyperShift, `create` creates an S3 bucket for the OIDC documents of hosted clusters if it's missing, by default `$USER-hypershift-oidc`. Its objects are publicly readable.
 
-`hyperctl destroy shared --platform aws` keeps the bucket and the EC2 Spot service-linked role, which belongs to the whole account. Delete the bucket by hand if you no longer need it.
+`hyperctl destroy shared --platform aws` deletes the bucket once it's empty. If it still holds documents, e.g. of hosted clusters created without hyperctl, it lists their infra IDs and keeps the bucket. The EC2 Spot service-linked role belongs to the whole account and is kept.

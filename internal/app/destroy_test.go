@@ -324,16 +324,78 @@ func (e *testEnv) hostedInfraID(t *testing.T) string {
 	return ""
 }
 
-func TestDestroySharedAWSResources(t *testing.T) {
+func TestDestroySharedAWSDeletesEmptyOIDCBucket(t *testing.T) {
+	env := newTestEnv(t)
+	env.aws.publicBuckets["tester-hypershift-oidc"] = "eu-west-1"
+
+	env.run(t, "destroy", "shared", "--platform", "aws", "--yes")
+
+	if want := []deletedBucket{{"tester-hypershift-oidc", "eu-west-1"}}; !slices.Equal(env.aws.deletedBuckets, want) {
+		t.Errorf("deleted buckets: got %v, want %v", env.aws.deletedBuckets, want)
+	}
+	if len(env.azure.deletedApplications)+len(env.azure.deletedResourceGroups) != 0 {
+		t.Errorf("expected no Azure resources deleted, got %v and %v", env.azure.deletedApplications, env.azure.deletedResourceGroups)
+	}
+}
+
+func TestDestroySharedAWSDeletesConfiguredOIDCBucket(t *testing.T) {
+	env := newTestEnv(t)
+	mustMkdir(t, filepath.Join(env.home, ".config", "hyperctl"))
+	writeFile(t, filepath.Join(env.home, ".config", "hyperctl", "config.yaml"), "oidcBucket: team-oidc\n", 0o600)
+	env.aws.publicBuckets["team-oidc"] = "us-east-1"
+	env.aws.publicBuckets["tester-hypershift-oidc"] = "us-east-1"
+
+	env.run(t, "destroy", "shared", "--platform", "aws", "--yes")
+
+	if want := []deletedBucket{{"team-oidc", "us-east-1"}}; !slices.Equal(env.aws.deletedBuckets, want) {
+		t.Errorf("deleted buckets: got %v, want %v", env.aws.deletedBuckets, want)
+	}
+}
+
+// TestDestroySharedAWSKeepsOIDCBucketWithDocuments keeps a bucket that still
+// holds OIDC documents, which hosted clusters outside of hyperctl may use.
+func TestDestroySharedAWSKeepsOIDCBucketWithDocuments(t *testing.T) {
+	env := newTestEnv(t)
+	env.aws.publicBuckets["tester-hypershift-oidc"] = "eu-west-1"
+	env.aws.bucketObjects = map[string][]string{"tester-hypershift-oidc": {
+		"other-abc12/.well-known/openid-configuration",
+		"other-abc12/openid/v1/jwks",
+	}}
+
+	_, err := env.runErr(t, "destroy", "shared", "--platform", "aws", "--yes")
+
+	if err == nil || !strings.Contains(err.Error(), "other-abc12") {
+		t.Errorf("expected an error naming the documents, got %v", err)
+	}
+	if len(env.aws.deletedBuckets) != 0 {
+		t.Errorf("expected no bucket deleted, got %v", env.aws.deletedBuckets)
+	}
+}
+
+func TestDestroySharedAWSWithoutOIDCBucket(t *testing.T) {
 	env := newTestEnv(t)
 
 	out := env.run(t, "destroy", "shared", "--platform", "aws", "--yes")
 
-	if !strings.Contains(out, "No shared AWS resources to destroy") {
-		t.Errorf("expected nothing to destroy, got:\n%s", out)
+	if !strings.Contains(out, "OIDC bucket tester-hypershift-oidc does not exist") {
+		t.Errorf("expected the missing bucket to be reported, got:\n%s", out)
 	}
-	if len(env.azure.deletedApplications)+len(env.azure.deletedResourceGroups) != 0 {
-		t.Errorf("expected no Azure resources deleted, got %v and %v", env.azure.deletedApplications, env.azure.deletedResourceGroups)
+	if len(env.aws.deletedBuckets) != 0 {
+		t.Errorf("expected no bucket deleted, got %v", env.aws.deletedBuckets)
+	}
+}
+
+func TestDestroySharedAWSRequiresConfirmation(t *testing.T) {
+	env := newTestEnv(t)
+	env.aws.publicBuckets["tester-hypershift-oidc"] = "eu-west-1"
+
+	_, err := env.runErr(t, "destroy", "shared", "--platform", "aws")
+
+	if err == nil || !strings.Contains(err.Error(), "--yes") {
+		t.Errorf("expected an error asking for --yes, got %v", err)
+	}
+	if len(env.aws.deletedBuckets) != 0 {
+		t.Errorf("expected no bucket deleted, got %v", env.aws.deletedBuckets)
 	}
 }
 
