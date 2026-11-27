@@ -15,6 +15,18 @@ import (
 	"github.com/linkvt/hyperctl/internal/ocp"
 )
 
+func TestCreateHelpShowsOneDefaultOfWorkers(t *testing.T) {
+	env := newTestEnv(t)
+
+	out := env.run(t, "create", "--help")
+
+	for line := range strings.Lines(out) {
+		if strings.Contains(line, "--workers") && strings.Count(line, "(default:") != 1 {
+			t.Errorf("expected one default in %q", line)
+		}
+	}
+}
+
 func TestCreateRunsInstallerWithReleaseAndInstallConfig(t *testing.T) {
 	env := newTestEnv(t)
 
