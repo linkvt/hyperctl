@@ -177,7 +177,8 @@ func browseTags(ctx context.Context, p progress, client releases.Client, filter 
 		return nil, nil, err
 	}
 	if err := huh.NewForm(huh.NewGroup(
-		tui.Select(huh.NewSelect[string]().Title("Release stream").Options(huh.NewOptions(streams...)...).Height(15).Value(stream)),
+		// Options scrolls to the bound value, so Value comes first.
+		tui.Select(huh.NewSelect[string]().Title("Release stream").Value(stream).Options(huh.NewOptions(streams...)...).Height(15)),
 	)).RunWithContext(ctx); err != nil {
 		return nil, nil, err
 	}
