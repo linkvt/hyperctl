@@ -42,6 +42,15 @@ The release applies only to the clusters the run creates. A new hosted cluster t
 
 The existing cluster decides the platform and the values it recorded: region, base domain and pull secret. `create` doesn't ask for recorded values, and flags with other values are rejected. `--instance-type` and `--workers` only apply to new clusters.
 
+<details>
+<summary>Recording: add a hosted cluster to the current cluster</summary>
+
+![hyperctl create adding a hosted cluster](assets/add.gif)
+
+<sub>The run took 20 minutes; the recording is shortened to 40 seconds: waits are cut and long output of `hypershift` is skipped.</sub>
+
+</details>
+
 ### Examples
 
 ```sh
@@ -78,6 +87,15 @@ hyperctl status              # state of the current cluster and its relatives
 ```
 
 `status` shows the management cluster with its hosted clusters, or a hosted cluster with its management cluster: whether the API responds, whether the HyperShift operator is installed, whether the hosted clusters are available, their image overrides, and how to proceed with incomplete clusters.
+
+<details>
+<summary>Recording: list, switch and use clusters on AWS and Azure</summary>
+
+![hyperctl list, use, status and kubeconfig](assets/clusters.gif)
+
+<sub>Waits shortened.</sub>
+
+</details>
 
 ### Kubeconfig
 
@@ -129,6 +147,15 @@ hyperctl destroy --cluster <name>    # another one
 - Destroying a management cluster destroys its hosted clusters first.
 - It asks for confirmation; without a terminal it requires `--yes`.
 - If the management cluster is unreachable, the cloud resources of its hosted clusters are still deleted.
+
+<details>
+<summary>Recording: destroy an AKS management cluster with its hosted cluster</summary>
+
+![hyperctl destroy](assets/destroy.gif)
+
+<sub>The run took 18 minutes; the recording is shortened to 18 seconds: waits are cut and long output of `hypershift` is skipped.</sub>
+
+</details>
 
 [Shared resources](concepts.md) are kept. Delete them once no cluster of the platform is left:
 

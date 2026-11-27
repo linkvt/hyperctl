@@ -5,7 +5,9 @@
 
 Interactive CLI that creates clusters for Karpenter development on AWS or Azure: a HyperShift management cluster with an AutoNode hosted cluster, or just parts of it. On AWS the management cluster is OpenShift, on Azure it's AKS. hyperctl remembers the clusters it creates and keeps a current cluster, like a kubectl context, so most commands need no cluster name.
 
-<!-- TODO: asciinema recording of hyperctl create, docs/assets/create.gif -->
+![hyperctl create on AWS](docs/assets/create.gif)
+
+<sub>`hyperctl create` of an AWS management cluster with an AutoNode hosted cluster. The run took an hour; the recording is shortened to a minute: waits are cut and long output of `openshift-install` and `hypershift` is skipped.</sub>
 
 ## Prerequisites
 
@@ -47,6 +49,15 @@ hyperctl image karpenter-provider --reset # back to the release image
 ```
 
 `karpenter-operator` overrides the operator the same way. Details: [Image overrides](docs/usage.md#image-overrides).
+
+<details>
+<summary>Recording: override both images and reset them</summary>
+
+![hyperctl image](docs/assets/image.gif)
+
+<sub>Waits shortened.</sub>
+
+</details>
 
 ## Commands
 
