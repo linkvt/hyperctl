@@ -207,8 +207,9 @@ func (s clusterStore) markInstalled(c clusterRef) error {
 }
 
 // markOperatorInstalled records that the HyperShift operator is installed on
-// a management cluster.
-func (s clusterStore) markOperatorInstalled(c clusterRef) error {
+// a management cluster, with the base domain and pull secret it uses, which
+// a cluster created without the operator may not have recorded.
+func (s clusterStore) markOperatorInstalled(c clusterRef, baseDomain, pullSecret string) error {
 	record, found, err := s.load(c)
 	if err != nil {
 		return err
@@ -217,6 +218,8 @@ func (s clusterStore) markOperatorInstalled(c clusterRef) error {
 		return fmt.Errorf("%s has no record", c)
 	}
 	record.HypershiftOperator = new(true)
+	record.BaseDomain = baseDomain
+	record.PullSecret = pullSecret
 	return s.save(c, record)
 }
 

@@ -303,6 +303,26 @@ func TestCreateAzureAddsOperatorToCluster(t *testing.T) {
 	}
 }
 
+// TestCreateAzureKeepsValuesOfAddedOperator expects the record of an AKS
+// cluster that got the operator later to hold the base domain and pull
+// secret of the operator, so that the next run installs it with the same.
+func TestCreateAzureKeepsValuesOfAddedOperator(t *testing.T) {
+	env := newTestEnv(t)
+	env.run(t, "create", "--platform", "azure", "--setup", "standalone", "--region", testAzureLocation, "--name", "test-aks")
+	env.run(t, "create", "--setup", "management", "--pull-secret", env.pullSecret, "--base-domain", "other.example.com")
+
+	env.run(t, "create")
+
+	want := hypershift.InstallAzureParams{
+		PullSecret:                 env.pullSecret,
+		ExternalDNSCredentialsFile: filepath.Join(env.home, ".local/share/hyperctl/azure/external-dns-credentials.json"),
+		ExternalDNSDomain:          "tester-hyperctl.other.example.com",
+	}
+	if got := env.hypershift.azureInstalls[len(env.hypershift.azureInstalls)-1].params; got != want {
+		t.Errorf("expected the operator to be installed again with\n%+v\ngot\n%+v", want, got)
+	}
+}
+
 func TestCreateAzureRemembersLocation(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)

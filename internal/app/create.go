@@ -158,7 +158,7 @@ func runCreate(ctx context.Context, cmd *cli.Command, deps Deps) error {
 		if err := run.installOperator(ctx, p, hs, opts); err != nil {
 			return err
 		}
-		if err := clusters.markOperatorInstalled(managementCluster(opts.Name)); err != nil {
+		if err := clusters.markOperatorInstalled(managementCluster(opts.Name), opts.BaseDomain, opts.PullSecret); err != nil {
 			return err
 		}
 	}
