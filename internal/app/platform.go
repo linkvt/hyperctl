@@ -80,27 +80,18 @@ func newPlatform(name string, deps Deps, dirs xdg.Dirs, clusters clusterStore) (
 	}
 }
 
-// resolvePlatform returns the platform of an existing cluster, or the one
-// from the flag, or asks for it if it may prompt.
-func resolvePlatform(ctx context.Context, p progress, cmd *cli.Command, deps Deps, target createTarget) (string, error) {
-	platform := platformAWS
-	if cmd.IsSet("platform") {
-		platform = cmd.String("platform")
-		if platform != platformAWS && platform != platformAzure {
-			return "", fmt.Errorf("unknown platform %q, expected %s or %s", platform, platformAWS, platformAzure)
+// resolvePlatform returns the platform of new clusters from the flag, or
+// asks for it if it may prompt, by default aws.
+func resolvePlatform(ctx context.Context, cmd *cli.Command, deps Deps) (string, error) {
+	if !cmd.IsSet("platform") {
+		if prompts(cmd, deps) {
+			return promptPlatform(ctx, platformAWS)
 		}
+		return platformAWS, nil
 	}
-
-	if target.mgmt.recorded {
-		record := target.mgmt.record
-		if cmd.IsSet("platform") && platform != record.Platform {
-			return "", fmt.Errorf("%s runs on %s, choose another --name for a cluster on %s", target.mgmt.clusterRef, record.Platform, platform)
-		}
-		p.done("Platform %s (%s)", record.Platform, target.mgmt.clusterRef)
-		return record.Platform, nil
-	}
-	if prompts(cmd, deps) && !cmd.IsSet("platform") {
-		return promptPlatform(ctx, platform)
+	platform := cmd.String("platform")
+	if platform != platformAWS && platform != platformAzure {
+		return "", fmt.Errorf("unknown platform %q, expected %s or %s", platform, platformAWS, platformAzure)
 	}
 	return platform, nil
 }

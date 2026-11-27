@@ -10,7 +10,7 @@ import (
 	"github.com/linkvt/hyperctl/internal/releases"
 )
 
-func TestNoReleasesError(t *testing.T) {
+func TestNoReleasesWarning(t *testing.T) {
 	const stream = "5.1.0-0.nightly"
 	tests := map[string]struct {
 		filter releaseFilter
@@ -31,7 +31,7 @@ func TestNoReleasesError(t *testing.T) {
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			if got := noReleasesError(stream, tc.filter).Error(); got != tc.want {
+			if got := noReleasesWarning(stream, tc.filter); got != tc.want {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})

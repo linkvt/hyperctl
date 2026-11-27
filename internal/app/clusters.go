@@ -158,11 +158,18 @@ func (s clusterStore) check(c clusterRef) (bool, error) {
 		return false, err
 	case record.Phase == phaseInstalled:
 		return true, nil
-	case c.hosted != "":
-		return false, fmt.Errorf("previous creation of hosted cluster %s did not complete, destroy it first", c.hosted)
 	default:
-		return false, fmt.Errorf("previous installation of management cluster %s did not complete, destroy it first", c.mgmt)
+		return false, incompleteError(c)
 	}
+}
+
+// incompleteError explains that a cluster whose creation did not complete
+// must be destroyed first.
+func incompleteError(c clusterRef) error {
+	if c.isHosted() {
+		return fmt.Errorf("previous creation of hosted cluster %s did not complete, destroy it first", c.hosted)
+	}
+	return fmt.Errorf("previous installation of management cluster %s did not complete, destroy it first", c.mgmt)
 }
 
 // begin saves the record of a new cluster as installing, a management

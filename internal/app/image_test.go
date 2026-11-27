@@ -151,7 +151,7 @@ func TestImageRequiresHostedCluster(t *testing.T) {
 
 	_, err := env.runErr(t, "image", "karpenter-operator", "quay.io/test/karpenter-operator:dev")
 
-	if err == nil || !strings.Contains(err.Error(), "no hosted cluster") {
-		t.Errorf("expected missing hosted cluster error, got %v", err)
+	if want := "no hosted cluster on cluster test-mgmt, create one with: hyperctl create --cluster test-mgmt --setup hosted"; err == nil || err.Error() != want {
+		t.Errorf("got %v, want %q", err, want)
 	}
 }

@@ -502,7 +502,7 @@ func TestCreateRemembersSetup(t *testing.T) {
 	args = []string{
 		"create",
 		"--region", "eu-central-1",
-		"--name", "test-mgmt",
+		"--name", "second",
 		"--pull-secret", env.pullSecret,
 	}
 	env.run(t, args...)
@@ -539,7 +539,7 @@ func TestCreateCanOverrideRememberedSetup(t *testing.T) {
 		"--setup", "hosted",
 		"--release", "5.1.0-ec.0",
 		"--region", "eu-central-1",
-		"--name", "test-mgmt",
+		"--name", "second",
 		"--pull-secret", env.pullSecret,
 	}
 	env.run(t, args...)
@@ -596,35 +596,6 @@ func TestCreateSetupStandaloneSkipsHosting(t *testing.T) {
 	record := readFile(t, filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/cluster.yaml"))
 	if !strings.Contains(record, "hypershiftOperator: false") {
 		t.Errorf("expected the record to note no HyperShift operator, got:\n%s", record)
-	}
-}
-
-// TestCreateAddsOperatorToCluster expects create with setup hosted on a
-// cluster without operator to add the operator and the hosted cluster.
-func TestCreateAddsOperatorToCluster(t *testing.T) {
-	env := newTestEnv(t)
-	args := []string{"create",
-		"--release", "5.1.0-ec.0",
-		"--region", "eu-central-1",
-		"--name", "test-mgmt",
-		"--pull-secret", env.pullSecret,
-	}
-	env.run(t, append(args, "--setup", "standalone")...)
-
-	env.run(t, append(args, "--setup", "hosted")...)
-
-	if got := len(env.images.creates); got != 1 {
-		t.Errorf("expected the cluster to be installed once, got %d installations", got)
-	}
-	if got := len(env.hypershift.installs); got != 1 {
-		t.Errorf("expected the HyperShift operator to be installed, got %d installs", got)
-	}
-	if got := len(env.hypershift.clusters); got != 1 {
-		t.Errorf("expected the hosted cluster to be created, got %d", got)
-	}
-	record := readFile(t, filepath.Join(env.home, ".local/share/hyperctl/clusters/test-mgmt/cluster.yaml"))
-	if !strings.Contains(record, "hypershiftOperator: true") {
-		t.Errorf("expected the record to note the HyperShift operator, got:\n%s", record)
 	}
 }
 
@@ -792,40 +763,6 @@ func TestCreateRefusesIncompleteInstallation(t *testing.T) {
 	}
 }
 
-func TestCreateSkipsCreatedHostedCluster(t *testing.T) {
-	env := newTestEnv(t)
-	env.createClusters(t)
-
-	env.run(t, "create", "--name", "test-mgmt")
-
-	if creates := len(env.hypershift.clusters); creates != 1 {
-		t.Errorf("expected 1 hosted cluster creation, got %d", creates)
-	}
-}
-
-func TestCreateRefusesIncompleteHostedCluster(t *testing.T) {
-	env := newTestEnv(t)
-	args := []string{"create",
-		"--release", "5.1.0-ec.0",
-		"--region", "eu-central-1",
-		"--name", "test-mgmt",
-		"--pull-secret", env.pullSecret,
-	}
-	env.hypershift.createClusterErr = errors.New("hypershift create cluster: exit status 1")
-	if _, err := env.runErr(t, args...); err == nil {
-		t.Fatal("expected failing hypershift to fail create")
-	}
-	env.hypershift.createClusterErr = nil
-
-	_, err := env.runErr(t, args...)
-
-	if err == nil || !strings.Contains(err.Error(), "previous creation of hosted cluster test-mgmt-workload did not complete") {
-		t.Errorf("expected incomplete creation error, got %v", err)
-	}
-	if creates := len(env.hypershift.clusters); creates != 1 {
-		t.Errorf("expected 1 hosted cluster creation, got %d", creates)
-	}
-}
 func TestCreateSecondManagementCluster(t *testing.T) {
 	env := newTestEnv(t)
 	env.createClusters(t)
