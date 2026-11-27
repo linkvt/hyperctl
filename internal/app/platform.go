@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 	"github.com/urfave/cli/v3"
 
 	"github.com/linkvt/hyperctl/internal/xdg"

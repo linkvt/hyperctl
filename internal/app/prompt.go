@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 	"github.com/urfave/cli/v3"
 
 	"github.com/linkvt/hyperctl/internal/releases"
@@ -177,8 +177,7 @@ func browseTags(ctx context.Context, p progress, client releases.Client, filter 
 		return nil, nil, err
 	}
 	if err := huh.NewForm(huh.NewGroup(
-		// Options scrolls to the bound value, so Value comes first.
-		tui.Select(huh.NewSelect[string]().Title("Release stream").Value(stream).Options(huh.NewOptions(streams...)...).Height(15)),
+		tui.Select(huh.NewSelect[string]().Title("Release stream").Options(huh.NewOptions(streams...)...).Height(15).Value(stream)),
 	)).RunWithContext(ctx); err != nil {
 		return nil, nil, err
 	}
