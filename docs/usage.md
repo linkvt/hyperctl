@@ -45,7 +45,7 @@ The existing cluster decides the platform and the values it recorded: region, ba
 <details>
 <summary>Recording: add a hosted cluster to the current cluster</summary>
 
-![hyperctl create adding a hosted cluster](assets/add.gif)
+![hyperctl create adding a hosted cluster](assets/add.webp)
 
 <sub>The run took 20 minutes; the recording is shortened to 40 seconds: waits are cut and long output of `hypershift` is skipped.</sub>
 
@@ -91,7 +91,7 @@ hyperctl status              # state of the current cluster and its relatives
 <details>
 <summary>Recording: list, switch and use clusters on AWS and Azure</summary>
 
-![hyperctl list, use, status and kubeconfig](assets/clusters.gif)
+![hyperctl list, use, status and kubeconfig](assets/clusters.webp)
 
 <sub>Waits shortened.</sub>
 
@@ -151,7 +151,7 @@ hyperctl destroy --cluster <name>    # another one
 <details>
 <summary>Recording: destroy an AKS management cluster with its hosted cluster</summary>
 
-![hyperctl destroy](assets/destroy.gif)
+![hyperctl destroy](assets/destroy.webp)
 
 <sub>The run took 18 minutes; the recording is shortened to 18 seconds: waits are cut and long output of `hypershift` is skipped.</sub>
 
