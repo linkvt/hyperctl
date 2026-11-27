@@ -236,7 +236,7 @@ func TestCreateAzureReusesSharedResources(t *testing.T) {
 	env := newTestEnv(t)
 	env.createAzureClusters(t)
 
-	env.run(t, "create", "--pull-secret", env.pullSecret)
+	env.run(t, "create", "--cluster", "test-mgmt", "--setup", "management", "--pull-secret", env.pullSecret)
 
 	if env.azure.secretsAdded != 2 {
 		t.Errorf("expected no new client secrets, got %d secrets", env.azure.secretsAdded)
@@ -311,7 +311,7 @@ func TestCreateAzureKeepsValuesOfAddedOperator(t *testing.T) {
 	env.run(t, "create", "--platform", "azure", "--setup", "standalone", "--region", testAzureLocation, "--name", "test-aks")
 	env.run(t, "create", "--setup", "management", "--pull-secret", env.pullSecret, "--base-domain", "other.example.com")
 
-	env.run(t, "create")
+	env.run(t, "create", "--setup", "management")
 
 	want := hypershift.InstallAzureParams{
 		PullSecret:                 env.pullSecret,
@@ -456,21 +456,6 @@ func TestCreateAzureRequiresAvailableVMSize(t *testing.T) {
 	}
 }
 
-func TestCreateAzureSkipsInstalledClusters(t *testing.T) {
-	env := newTestEnv(t)
-
-	env.createAzureClusters(t)
-	// The release only applies to clusters to create.
-	env.run(t, "create")
-
-	if got := len(env.azure.aksClusters); got != 1 {
-		t.Errorf("expected 1 AKS cluster creation, got %d", got)
-	}
-	if got := len(env.hypershift.azureClusters); got != 1 {
-		t.Errorf("expected 1 hosted cluster creation, got %d", got)
-	}
-}
-
 func TestCreateAzureRefusesIncompleteManagementCluster(t *testing.T) {
 	env := newTestEnv(t)
 	env.azure.createAKSClusterErr = errors.New("creating AKS cluster: quota exceeded")
@@ -497,7 +482,7 @@ func TestCreateAzureRefusesIncompleteHostedCluster(t *testing.T) {
 	}
 	env.hypershift.createClusterErr = nil
 
-	_, err := env.runErr(t, env.azureCreateArgs()...)
+	_, err := env.runErr(t, "create", "--cluster", "test-mgmt", "--hosted-name", "test-mgmt-workload")
 
 	if err == nil || !strings.Contains(err.Error(), "previous creation of hosted cluster test-mgmt-workload did not complete") {
 		t.Errorf("expected incomplete creation error, got %v", err)

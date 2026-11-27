@@ -76,7 +76,7 @@ func (s selection) hosted() (storedCluster, error) {
 	hosted := s.hostedClusters()
 	switch len(hosted) {
 	case 0:
-		return storedCluster{}, fmt.Errorf("no hosted cluster on cluster %s, create one with: hyperctl create --name %s --setup hosted", s.cluster.mgmt, s.cluster.mgmt)
+		return storedCluster{}, fmt.Errorf("no hosted cluster on cluster %s, create one with: hyperctl create --cluster %s --setup hosted", s.cluster.mgmt, s.cluster.mgmt)
 	case 1:
 		return hosted[0], nil
 	default:

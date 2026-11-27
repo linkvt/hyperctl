@@ -81,30 +81,37 @@ hyperctl create --release 5.1.0-ec.0 --name "$USER-karpenter" --region eu-centra
 hyperctl create --setup management --release 5.1.0-ec.0 --name "$USER-karpenter" --region eu-central-1
 
 # On Azure
-hyperctl create --platform azure --release 5.1.0-ec.0
+hyperctl create --platform azure --release 5.1.0-ec.0 --name "$USER-aks"
 
 # AKS cluster without HyperShift
-hyperctl create --platform azure --setup standalone
+hyperctl create --platform azure --setup standalone --name "$USER-aks"
 
 # A second management cluster next to the current one
 hyperctl create --name "$USER-second" --release 5.1.0-ec.0
 
-# A second hosted cluster on an existing management cluster
-hyperctl create --name "$USER-karpenter" --hosted-name "$USER-karpenter-2" --release 5.2.0-ec.1
+# A further hosted cluster with another release on the current cluster
+hyperctl create --release 5.2.0-ec.1
+
+# A hosted cluster on another existing cluster, installing the HyperShift operator if missing
+hyperctl create --cluster "$USER-second" --hosted-name "$USER-second-5-2" --release 5.2.0-ec.1
+
+# Only update the HyperShift operator of the current cluster to the hypershift binary in use
+hyperctl create --setup management
 ```
 
 In a terminal, `create` asks for every value not given as a flag, prefilled with the defaults, and asks to confirm a summary.
 With `--yes`, or without a terminal, it asks nothing: it takes the defaults and fails if a required value is missing.
 
-- **Names:** `--name` names the standalone or management cluster, `--hosted-name` the hosted cluster, each new or existing. `create` asks for them first, prefilled with the current cluster, or its management cluster, and its hosted cluster, so that re-running `create` continues the current cluster. Without a current cluster, the names are `$USER-karpenter` and `<name>-workload`; with several hosted clusters, `<name>-workload` too. Names are unique across all clusters, a name of another cluster is rejected. The kubeconfig contexts are named after the clusters.
-- **Platform:** an existing cluster `--name` determines the platform and `create` reports it; otherwise `create` asks for it, or uses `--platform` (default `aws`).
-- **Setup:** `--setup hosted` creates a management cluster with an AutoNode hosted cluster, `management` the management cluster and HyperShift operator, `standalone` only the cluster, without anything HyperShift needs. `create` remembers the last choice. Flags the setup doesn't use, like `--hosted-name` without a hosted cluster or `--release` for a standalone AKS cluster, are rejected.
+- **New or add:** `create` either creates a new cluster or adds to an existing one. `--name` creates a new cluster, `--cluster` adds to an existing one, or to the management cluster of a hosted cluster. Without either, `create` adds to the current cluster; in a terminal it asks first whether to add to the current cluster or create a new one. Without a current cluster, or if its installation did not complete, `create` creates a new one.
+- **Names:** `--name` names a new standalone or management cluster, by default `$USER-karpenter`. `--hosted-name` names a new hosted cluster, by default the first free of `<name>-workload`, `<name>-workload-2`, and so on. Names are unique across all clusters, a name of an existing cluster is rejected. The kubeconfig contexts are named after the clusters.
+- **Platform:** `create` asks for the platform of a new cluster, or uses `--platform` (default `aws`). An existing cluster determines the platform and `create` reports it.
+- **Setup:** for a new cluster, `--setup hosted` creates a management cluster with an AutoNode hosted cluster, `management` the management cluster and HyperShift operator, `standalone` only the cluster, without anything HyperShift needs. `create` remembers the last choice for new clusters. Added to an existing cluster, `hosted` (the default) installs or updates the HyperShift operator and creates a hosted cluster, `management` only installs or updates the operator. Flags the setup doesn't use, like `--hosted-name` without a hosted cluster or `--release` for a standalone AKS cluster, are rejected.
 - **Release:** not needed for an AKS cluster without HyperShift. A version of an official release (`5.1.0-ec.0`) or a release image pull spec, e.g. of a nightly. Interactively, `create` lets you browse the [release controller](https://amd64.ocp.releases.ci.openshift.org/). `create` checks that the pull secret can pull the release image before creating anything; CI release images need a login to the CI registry, and `create` explains how to add it to the pull secret.
 - **Size:** the size prompt offers presets for the cluster, see the platforms below. `--instance-type` and `--workers` skip it.
 - **Region:** `--region` is the AWS region or the Azure location. It defaults to the config file, then the last used region of the platform, then the region of the AWS profile or `westus3`.
 
-`create` skips installed clusters and creates the missing ones; with another setup it adds the HyperShift operator and the hosted cluster to an existing cluster, with another `--hosted-name` a further hosted cluster. It installs the operator on every run, which updates it to the hypershift binary in use.
-An existing management cluster determines the region, base domain and pull secret of its hosted clusters, `create` doesn't ask for them, and flags that differ are rejected. The release applies only to the clusters `create` creates: a new hosted cluster takes the release of its management cluster unless `--release` says otherwise, and `--release` without a cluster to create is rejected.
+Adding to an existing cluster installs the HyperShift operator on every run, which updates it to the hypershift binary in use.
+An existing cluster determines the region, base domain and pull secret of its hosted clusters, `create` doesn't ask for them, and flags that differ are rejected. The release applies only to the clusters `create` creates: a new hosted cluster takes the release of its management cluster unless `--release` says otherwise, and `--release` without a cluster to create is rejected.
 Several `create` runs may run at the same time for different clusters.
 A cluster whose creation did not complete has to be destroyed first; if only the hosted cluster failed, `hyperctl destroy --cluster <hosted cluster>` keeps the management cluster.
 

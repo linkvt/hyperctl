@@ -72,6 +72,10 @@ func promptCreateOptions(ctx context.Context, p progress, cmd *cli.Command, clie
 			return err
 		}
 	}
+	// The size applies to the cluster a new run creates first.
+	if target.add {
+		return nil
+	}
 	return run.promptSize(ctx, cmd)
 }
 
@@ -234,15 +238,21 @@ func filterBrowseTags(ctx context.Context, client releases.Client, stream string
 }
 
 // confirmCreateOptions shows a summary and fails unless the user confirms.
-func confirmCreateOptions(ctx context.Context, platformName string, run platformCreate, opts createOptions) error {
-	setup := map[setup]string{
+func confirmCreateOptions(ctx context.Context, target createTarget, run platformCreate, opts createOptions) error {
+	labels := map[setup]string{
 		setupStandalone: "Standalone cluster",
 		setupManagement: "Management cluster and HyperShift operator",
 		setupHosted:     "Management and hosted cluster",
-	}[opts.Setup]
+	}
+	if target.add {
+		labels = map[setup]string{
+			setupManagement: "Add: install or update the HyperShift operator",
+			setupHosted:     "Add: hosted cluster, installs or updates the HyperShift operator",
+		}
+	}
 	lines := []string{
-		"Platform:       " + platformName,
-		"Setup:          " + setup,
+		"Platform:       " + target.platform,
+		"Setup:          " + labels[opts.Setup],
 	}
 	if opts.Release != "" {
 		lines = append(lines, "Release:        "+opts.Release)
@@ -255,14 +265,19 @@ func confirmCreateOptions(ctx context.Context, platformName string, run platform
 	if !opts.Setup.operator() {
 		clusterLabel, sizeLabel = "Cluster:        ", "Cluster size:   "
 	}
-	lines = append(lines, clusterLabel+opts.Name, sizeLabel+run.describeSize())
+	lines = append(lines, clusterLabel+opts.Name)
+	if !target.add {
+		lines = append(lines, sizeLabel+run.describeSize())
+	}
 	if opts.Setup.hosted() {
 		lines = append(lines, "Hosted cluster: "+opts.HostedName)
 	}
 	if run.needsRelease() {
 		lines = append(lines, "Pull secret:    "+opts.PullSecret)
 	}
-	lines = append(lines, "SSH key:        "+cmp.Or(opts.SSHKey, "none"))
+	if target.creates() {
+		lines = append(lines, "SSH key:        "+cmp.Or(opts.SSHKey, "none"))
+	}
 	lines = append(lines, run.summary()...)
 	if opts.Setup.operator() {
 		karpenterOperator := "embedded"
