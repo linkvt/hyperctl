@@ -127,72 +127,84 @@ func promptRelease(ctx context.Context, p progress, client releases.Client, last
 }
 
 // browseReleases lets the user choose which release results to browse, then
-// select a stream and one of its releases.
+// select a stream and one of its releases. If no release of the stream
+// matches, it starts over with the previous choices preselected, or the
+// first stream if the filter no longer lists the previous one.
 func browseReleases(ctx context.Context, p progress, client releases.Client) (string, error) {
 	filter := releaseFilterAcceptedNoFailures
+	var stream string
+	for {
+		tags, failureCounts, err := browseTags(ctx, p, client, &filter, &stream)
+		if err != nil {
+			return "", err
+		}
+		if len(tags) == 0 {
+			p.warn("%s", noReleasesWarning(stream, filter))
+			continue
+		}
+		var options []huh.Option[string]
+		for _, tag := range tags {
+			options = append(options, huh.NewOption(releaseOptionLabel(tag, failureCounts[tag.Name]), tag.PullSpec))
+		}
+		var pullSpec string
+		err = huh.NewForm(huh.NewGroup(
+			tui.Select(huh.NewSelect[string]().Title("Release in " + stream).Options(options...).Height(15).Value(&pullSpec)),
+		)).RunWithContext(ctx)
+		return pullSpec, err
+	}
+}
+
+// browseTags asks for the filter and the stream, prefilled with the given
+// ones, and returns the releases of the stream that match the filter.
+func browseTags(ctx context.Context, p progress, client releases.Client, filter *releaseFilter, stream *string) ([]releases.Tag, map[string]int, error) {
 	if err := huh.NewForm(huh.NewGroup(
 		huh.NewSelect[releaseFilter]().Title("Releases").Options(
 			huh.NewOption("Accepted, no failed jobs", releaseFilterAcceptedNoFailures),
 			huh.NewOption("Accepted (including failed jobs)", releaseFilterAccepted),
 			huh.NewOption("All phases (also Ready and Rejected)", releaseFilterAll),
-		).Value(&filter),
+		).Value(filter),
 	)).RunWithContext(ctx); err != nil {
-		return "", err
+		return nil, nil, err
 	}
 
 	var streams []string
 	err := p.wait(ctx, "Loading release streams", func(ctx context.Context) error {
 		var err error
-		streams, err = client.Streams(ctx, filter == releaseFilterAll)
+		streams, err = client.Streams(ctx, *filter == releaseFilterAll)
 		return err
 	})
 	if err != nil {
-		return "", err
+		return nil, nil, err
 	}
-	var stream string
 	if err := huh.NewForm(huh.NewGroup(
-		tui.Select(huh.NewSelect[string]().Title("Release stream").Options(huh.NewOptions(streams...)...).Height(15).Value(&stream)),
+		tui.Select(huh.NewSelect[string]().Title("Release stream").Options(huh.NewOptions(streams...)...).Height(15).Value(stream)),
 	)).RunWithContext(ctx); err != nil {
-		return "", err
+		return nil, nil, err
 	}
 
 	var tags []releases.Tag
 	var failureCounts map[string]int
-	err = p.wait(ctx, "Loading releases of "+stream, func(ctx context.Context) error {
+	err = p.wait(ctx, "Loading releases of "+*stream, func(ctx context.Context) error {
 		var err error
-		tags, err = client.Tags(ctx, stream)
+		tags, err = client.Tags(ctx, *stream)
 		if err != nil {
 			return err
 		}
-		tags, failureCounts, err = filterBrowseTags(ctx, client, stream, tags, filter)
+		tags, failureCounts, err = filterBrowseTags(ctx, client, *stream, tags, *filter)
 		return err
 	})
-	if err != nil {
-		return "", err
-	}
-	if len(tags) == 0 {
-		return "", noReleasesError(stream, filter)
-	}
-	var options []huh.Option[string]
-	for _, tag := range tags {
-		options = append(options, huh.NewOption(releaseOptionLabel(tag, failureCounts[tag.Name]), tag.PullSpec))
-	}
-	var pullSpec string
-	err = huh.NewForm(huh.NewGroup(
-		tui.Select(huh.NewSelect[string]().Title("Release in " + stream).Options(options...).Height(15).Value(&pullSpec)),
-	)).RunWithContext(ctx)
-	return pullSpec, err
+	return tags, failureCounts, err
 }
 
-func noReleasesError(stream string, filter releaseFilter) error {
+func noReleasesWarning(stream string, filter releaseFilter) string {
 	switch filter {
 	case releaseFilterAcceptedNoFailures:
-		return fmt.Errorf("no Accepted releases without failed jobs in stream %s; try %q or %q", stream,
+		return fmt.Sprintf("no Accepted releases without failed jobs in stream %s; try %q or %q", stream,
 			"Accepted (including failed jobs)", "All phases (also Ready and Rejected)")
 	case releaseFilterAccepted:
-		return fmt.Errorf("no Accepted releases in stream %s; try %q", stream, "All phases (also Ready and Rejected)")
+		return fmt.Sprintf("no Accepted releases in stream %s; try %q", stream, "All phases (also Ready and Rejected)")
 	default:
-		return fmt.Errorf("no releases in stream %s", stream)
+		return fmt.Sprintf("no releases in stream %s", stream)
 	}
 }
 
