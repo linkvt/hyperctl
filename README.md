@@ -1,5 +1,8 @@
 # hyperctl
 
+> [!NOTE]
+> This code base is heavily AI-generated.
+
 Interactive CLI that creates a HyperShift management cluster on AWS or Azure for Karpenter development, optionally with an AutoNode hosted cluster, or a cluster without HyperShift.
 On AWS the cluster is OpenShift, installed with `openshift-install`; on Azure it is AKS.
 hyperctl tracks the clusters it creates and keeps a current cluster, like a kubectl context, so `status`, `kubeconfig`, `image` and `destroy` need no cluster names.
