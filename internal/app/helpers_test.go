@@ -117,6 +117,9 @@ type fakeAWS struct {
 	// publicBuckets maps bucket names to their region.
 	publicBuckets  map[string]string
 	bucketsCreated int
+	// bucketObjects maps bucket names to the keys of their objects.
+	bucketObjects  map[string][]string
+	deletedBuckets []deletedBucket
 	// dns maps cluster names to their DNS entries.
 	dns map[string][]string
 	// beforeClusterDNS runs before the DNS entries of a cluster are looked up.
@@ -139,6 +142,21 @@ func (f *fakeAWS) BucketRegion(_ context.Context, bucket string) (string, bool, 
 func (f *fakeAWS) CreatePublicBucket(_ context.Context, bucket, region string) error {
 	f.publicBuckets[bucket] = region
 	f.bucketsCreated++
+	return nil
+}
+
+func (f *fakeAWS) BucketObjects(_ context.Context, bucket, _ string) ([]string, error) {
+	return f.bucketObjects[bucket], nil
+}
+
+// deletedBucket is a bucket deleted in a region.
+type deletedBucket struct {
+	name, region string
+}
+
+func (f *fakeAWS) DeleteBucket(_ context.Context, bucket, region string) error {
+	delete(f.publicBuckets, bucket)
+	f.deletedBuckets = append(f.deletedBuckets, deletedBucket{bucket, region})
 	return nil
 }
 

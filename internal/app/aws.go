@@ -30,6 +30,10 @@ type AWSAccount interface {
 	BucketRegion(ctx context.Context, bucket string) (string, bool, error)
 	// CreatePublicBucket creates a bucket with publicly readable objects.
 	CreatePublicBucket(ctx context.Context, bucket, region string) error
+	// BucketObjects returns the keys of the objects in a bucket in region.
+	BucketObjects(ctx context.Context, bucket, region string) ([]string, error)
+	// DeleteBucket deletes an empty bucket in region.
+	DeleteBucket(ctx context.Context, bucket, region string) error
 	// FirstZone returns the first available availability zone of a region.
 	FirstZone(ctx context.Context, region string) (string, error)
 	// ClusterDNS describes the DNS entries of a cluster with the given name.
@@ -72,13 +76,9 @@ func (a awsPlatform) newCreate(cmd *cli.Command, st state, cfg config, setup set
 		cfg:         cfg,
 		setup:       setup,
 		yes:         cmd.Bool("yes"),
-		oidcBucket:  cfg.OIDCBucket,
+		oidcBucket:  flagOr(cmd, "oidc-bucket", oidcBucket(cfg)),
 		size:        openshiftSize{InstanceType: cmp.Or(cfg.MgmtInstanceType, defaultSize.InstanceType), Workers: defaultSize.Workers},
 	}
-	if user := os.Getenv("USER"); user != "" {
-		run.oidcBucket = cmp.Or(run.oidcBucket, user+"-hypershift-oidc")
-	}
-	run.oidcBucket = flagOr(cmd, "oidc-bucket", run.oidcBucket)
 	if cfg.MgmtWorkers != nil {
 		run.size.Workers = *cfg.MgmtWorkers
 	}
@@ -87,6 +87,18 @@ func (a awsPlatform) newCreate(cmd *cli.Command, st state, cfg config, setup set
 		run.size.Workers = cmd.Int("workers")
 	}
 	return run, nil
+}
+
+// oidcBucket returns the OIDC bucket from the config file, by default
+// derived from $USER, or "" if neither is set.
+func oidcBucket(cfg config) string {
+	if cfg.OIDCBucket != "" {
+		return cfg.OIDCBucket
+	}
+	if user := os.Getenv("USER"); user != "" {
+		return user + "-hypershift-oidc"
+	}
+	return ""
 }
 
 func (r *awsCreate) defaultRegion() string {
@@ -313,9 +325,71 @@ func (a awsPlatform) destroyMgmt(ctx context.Context, p progress, yes bool, name
 	return destroyMgmtCluster(ctx, p, yes, a.deps, a.dirs, a.clusters, name)
 }
 
-// destroyShared keeps the OIDC bucket, it is not deleted yet, and the EC2
-// Spot service-linked role, which other users of the account share.
-func (a awsPlatform) destroyShared(_ context.Context, p progress, _ bool) error {
-	p.done("No shared AWS resources to destroy, the OIDC bucket and the EC2 Spot service-linked role are kept")
+// destroyShared deletes the OIDC bucket if it holds no documents. Documents
+// may belong to hosted clusters that hyperctl doesn't know about, as the
+// bucket may have been created before hyperctl. The EC2 Spot service-linked
+// role is kept, other users of the account share it.
+func (a awsPlatform) destroyShared(ctx context.Context, p progress, yes bool) error {
+	p.done("Keeping the EC2 Spot service-linked role, the whole account shares it")
+	cfg, err := loadConfig(a.dirs.Config)
+	if err != nil {
+		return err
+	}
+	bucket := oidcBucket(cfg)
+	if bucket == "" {
+		p.done("No OIDC bucket configured")
+		return nil
+	}
+	var region string
+	var found bool
+	var objects []string
+	err = p.wait(ctx, "Checking OIDC bucket "+bucket, func(ctx context.Context) error {
+		var err error
+		if region, found, err = a.deps.AWS.BucketRegion(ctx, bucket); err != nil || !found {
+			return err
+		}
+		objects, err = a.deps.AWS.BucketObjects(ctx, bucket, region)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	if !found {
+		p.done("OIDC bucket %s does not exist", bucket)
+		return nil
+	}
+	if len(objects) > 0 {
+		return fmt.Errorf("OIDC bucket %s holds the documents of hosted clusters with infra IDs %s; for each one that no longer exists, delete them with: aws s3 rm --recursive s3://%s/<infra ID>", bucket, strings.Join(topLevelPrefixes(objects), ", "), bucket)
+	}
+	if !yes {
+		if !a.deps.Interactive {
+			return errors.New("destroying the shared AWS resources requires confirmation, pass --yes")
+		}
+		if err := confirmDestroy(ctx, []string{"OIDC bucket " + bucket}); err != nil {
+			return err
+		}
+	}
+	err = p.wait(ctx, "Deleting OIDC bucket "+bucket, func(ctx context.Context) error {
+		return a.deps.AWS.DeleteBucket(ctx, bucket, region)
+	})
+	if err != nil {
+		return err
+	}
+	p.done("Deleted OIDC bucket %s", bucket)
 	return nil
+}
+
+// topLevelPrefixes returns the distinct first path segments of object keys,
+// sorted. HyperShift stores the documents of a hosted cluster below its infra
+// ID.
+func topLevelPrefixes(keys []string) []string {
+	var prefixes []string
+	for _, key := range keys {
+		prefix, _, _ := strings.Cut(key, "/")
+		if !slices.Contains(prefixes, prefix) {
+			prefixes = append(prefixes, prefix)
+		}
+	}
+	slices.Sort(prefixes)
+	return prefixes
 }

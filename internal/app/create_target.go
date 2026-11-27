@@ -82,13 +82,14 @@ func resolveCreateMode(ctx context.Context, cmd *cli.Command, deps Deps, cluster
 	}
 	add := true
 	err := huh.NewForm(huh.NewGroup(
+		// Options scrolls to the bound value, so Value comes first.
 		huh.NewSelect[bool]().
 			Title("Create").
+			Value(&add).
 			Options(
 				huh.NewOption("Add to "+mgmt.clusterRef.String(), true),
 				huh.NewOption("New cluster", false),
-			).
-			Value(&add),
+			),
 	)).RunWithContext(ctx)
 	return mgmt, add, err
 }

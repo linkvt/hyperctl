@@ -177,7 +177,8 @@ func browseTags(ctx context.Context, p progress, client releases.Client, filter 
 		return nil, nil, err
 	}
 	if err := huh.NewForm(huh.NewGroup(
-		tui.Select(huh.NewSelect[string]().Title("Release stream").Options(huh.NewOptions(streams...)...).Height(15).Value(stream)),
+		// Options scrolls to the bound value, so Value comes first.
+		tui.Select(huh.NewSelect[string]().Title("Release stream").Value(stream).Options(huh.NewOptions(streams...)...).Height(15)),
 	)).RunWithContext(ctx); err != nil {
 		return nil, nil, err
 	}
@@ -301,7 +302,7 @@ func confirmCreateOptions(ctx context.Context, target createTarget, run platform
 	summary := strings.Join(lines, "\n")
 	confirmed := true
 	err := huh.NewForm(huh.NewGroup(
-		huh.NewNote().Title("Summary").Description(summary),
+		huh.NewNote().Title("Summary").Description(noteText(summary)),
 		huh.NewConfirm().Title("Create the clusters?").Value(&confirmed),
 	)).RunWithContext(ctx)
 	if err != nil {
@@ -311,6 +312,16 @@ func confirmCreateOptions(ctx context.Context, target createTarget, run platform
 		return errors.New("aborted")
 	}
 	return nil
+}
+
+// noteText escapes text for the description of a huh note, which renders
+// _, *, ` and \ as formatting. In accessible mode, which huh uses with
+// TERM=dumb, it prints the description as is.
+func noteText(text string) string {
+	if os.Getenv("TERM") == "dumb" {
+		return text
+	}
+	return strings.NewReplacer(`\`, `\\`, "_", `\_`, "*", `\*`, "`", "\\`").Replace(text)
 }
 
 func requireValue(s string) error {
@@ -363,7 +374,7 @@ func confirmDestroy(ctx context.Context, targets []string) error {
 func confirmDNSDeletion(ctx context.Context, list string) error {
 	confirmed := true
 	err := huh.NewForm(huh.NewGroup(
-		huh.NewNote().Title("DNS entries of previous clusters").Description(list),
+		huh.NewNote().Title("DNS entries of previous clusters").Description(noteText(list)),
 		huh.NewConfirm().Title("Delete these DNS entries?").Value(&confirmed),
 	)).RunWithContext(ctx)
 	if err != nil {

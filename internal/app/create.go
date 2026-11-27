@@ -51,7 +51,7 @@ func createCommand(deps Deps) *cli.Command {
 			&cli.BoolFlag{Name: "standalone-karpenter-operator", Value: true, Usage: "Run the standalone karpenter-operator in hosted clusters, =false (AWS only) runs the one embedded in the HyperShift operator image"},
 			&cli.StringFlag{Name: "hosted-name", Usage: "Name of the new hosted cluster (default: the first free of <name>-workload, <name>-workload-2, ...)"},
 			&cli.StringFlag{Name: "instance-type", Usage: "EC2 instance type or Azure VM size of the management cluster nodes (default: " + defaultSize.InstanceType + ", on Azure " + defaultAzureVMSize + ")"},
-			&cli.IntFlag{Name: "workers", Usage: "Worker nodes of the management cluster, on Azure the number of AKS nodes (default: 3; on AWS 0 or 1 runs a compact cluster in one zone)"},
+			&cli.IntFlag{Name: "workers", HideDefault: true, Usage: "Worker nodes of the management cluster, on Azure the number of AKS nodes (default: 3; on AWS 0 or 1 runs a compact cluster in one zone)"},
 			&cli.StringFlag{Name: "hypershift", Usage: "Path to the hypershift binary (default: from PATH)"},
 			&cli.StringFlag{Name: "oidc-bucket", Usage: "S3 bucket for OIDC discovery documents on AWS, created if missing (default: $USER-hypershift-oidc)"},
 		},

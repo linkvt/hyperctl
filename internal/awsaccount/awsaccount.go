@@ -109,3 +109,27 @@ func (a *Account) CreatePublicBucket(ctx context.Context, bucket, region string)
 	}
 	return nil
 }
+
+// BucketObjects returns the keys of the objects in a bucket in region.
+func (a *Account) BucketObjects(ctx context.Context, bucket, region string) ([]string, error) {
+	var keys []string
+	pages := s3.NewListObjectsV2Paginator(a.s3, &s3.ListObjectsV2Input{Bucket: aws.String(bucket)})
+	for pages.HasMorePages() {
+		page, err := pages.NextPage(ctx, func(o *s3.Options) { o.Region = region })
+		if err != nil {
+			return nil, fmt.Errorf("listing objects of bucket %s: %w", bucket, err)
+		}
+		for _, object := range page.Contents {
+			keys = append(keys, aws.ToString(object.Key))
+		}
+	}
+	return keys, nil
+}
+
+// DeleteBucket deletes an empty bucket in region.
+func (a *Account) DeleteBucket(ctx context.Context, bucket, region string) error {
+	if _, err := a.s3.DeleteBucket(ctx, &s3.DeleteBucketInput{Bucket: aws.String(bucket)}, func(o *s3.Options) { o.Region = region }); err != nil {
+		return fmt.Errorf("deleting bucket %s: %w", bucket, err)
+	}
+	return nil
+}
